@@ -39,6 +39,8 @@
     "files.associations": {
         "*.va": "verilog",
         "pio.h": "c",
-        "pt_cornell_rp2040_v1_3.h": "c"
+        "pt_cornell_rp2040_v1_3.h": "c",
+        "phone_img.h": "c",
+        "heartrate_img.h": "c"
     }
 }

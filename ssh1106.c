@@ -304,7 +304,7 @@ char SSH1106_Putc(char ch, FontDef_t* Font, SSH1106_COLOR_t color) {
 			if ((b << j) & 0x8000) {
 				SSH1106_DrawPixel(SSH1106.CurrentX + j, (SSH1106.CurrentY + i), (SSH1106_COLOR_t) color);
 			} else {
-				SSH1106_DrawPixel(SSH1106.CurrentX + j, (SSH1106.CurrentY + i), (SSH1106_COLOR_t)!color);
+				SSH1106_DrawPixel(SSH1106.CurrentX + j, (SSH1106.CurrentY + i), SSH1106_COLOR_BLACK);
 			}
 		}
 	}
