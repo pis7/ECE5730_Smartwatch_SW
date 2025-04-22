@@ -2,10 +2,7 @@
 #define SSH1106_H 
 
 #include "font_ssh1106.h"
-/* I2C address */
-#ifndef SSH1106_I2C_ADDR
-#define SSH1106_I2C_ADDR         0x3c
-#endif
+#include "common.h"
 
 /* SSH1106 settings */
 /* SSH1106 width in pixels */

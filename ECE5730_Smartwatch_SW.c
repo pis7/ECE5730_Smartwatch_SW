@@ -5,54 +5,25 @@
  *
  */
 
-// Include standard libraries
-#include <stdio.h>
-#include <stdlib.h>
-#include <stdint.h>
-#include <math.h>
-#include <string.h>
-
-// Include PICO libraries
-#include "pico/stdlib.h"
-#include "pico/multicore.h"
-#include "pico/time.h"
-
-// Include hardware libraries
-#include "hardware/pwm.h"
-#include "hardware/dma.h"
-#include "hardware/irq.h"
-#include "hardware/adc.h"
-#include "hardware/pio.h"
-#include "hardware/i2c.h"
-#include "hardware/spi.h"
+#include "common.h"
 
 // Include custom libraries
 #include "pt_cornell_rp2040_v1_3.h"
 #include "font_ssh1106.h"
 #include "ssh1106.h"
+#include "i3g4250d.h"
 
 // Include custom images
 #include "dat/battery_img.h"
 #include "dat/phone_img.h"
 #include "dat/heartrate_img.h"
+#include "dat/activity_img.h"
+#include "dat/weather_img.h"
 
 // Some macros for max/min/abs
 #define min(a,b) ((a<b) ? a:b)
 #define max(a,b) ((a<b) ? b:a)
 #define abs(a) ((a>0) ? a:-a)
-
-// I2C Config
-#define I2C_CHAN i2c0
-#define I2C_BAUD_RATE 400000 // 400kHz
-#define SDA_PIN 0
-#define SCL_PIN 1
-
-// SPI Config
-#define PIN_MISO 4
-#define PIN_CS   5
-#define PIN_SCK  6
-#define PIN_MOSI 7
-#define SPI_PORT spi0
 
 // GPIO Config
 #define CYCLE_BUTTON 14
@@ -71,7 +42,9 @@
 typedef enum {
   MM_TIME,
   MM_PHONE,
+  MM_WEATHER,
   MM_HEART_RATE,
+  MM_ACTIVITY,
   MM_BATTERY
 } main_menu_state_t;
 main_menu_state_t main_menu_state = MM_TIME;
@@ -82,30 +55,61 @@ typedef enum {
   DB_PRESSED,
   DB_MAYBE_NOT_PRESSED
 } debounce_state_t;
-debounce_state_t cycle_button_state = DB_NOT_PRESSED;
 debounce_state_t select_button_state = DB_NOT_PRESSED;
+debounce_state_t cycle_button_state = DB_NOT_PRESSED;
+int in_sub_menu = 0;
 
-void update_main_menu() {
-  int pressed = gpio_get(CYCLE_BUTTON);
+void update_menu() {
+  int sel_pressed = gpio_get(SELECT_BUTTON);
+  switch (select_button_state) {
+    case DB_NOT_PRESSED:
+      if (sel_pressed) select_button_state = DB_MAYBE_PRESSED;
+      else select_button_state = DB_NOT_PRESSED;
+      break;
+    case DB_MAYBE_PRESSED:
+      if (sel_pressed) {
+        if (main_menu_state == MM_WEATHER || main_menu_state == MM_ACTIVITY) {
+          in_sub_menu = 1;
+          SSH1106_Clear();
+        }
+        select_button_state = DB_PRESSED;
+      }
+      else select_button_state = DB_NOT_PRESSED;
+      break;
+    case DB_PRESSED:
+      if (sel_pressed) select_button_state = DB_PRESSED;
+      else select_button_state = DB_MAYBE_NOT_PRESSED;
+      break;
+    case DB_MAYBE_NOT_PRESSED:
+      if (sel_pressed) select_button_state = DB_PRESSED;
+      else select_button_state = DB_NOT_PRESSED;
+      break;
+    default:
+      select_button_state = DB_NOT_PRESSED;
+      break;
+  }
+
+  int cyc_pressed = gpio_get(CYCLE_BUTTON);
   switch (cycle_button_state) {
     case DB_NOT_PRESSED:
-      if (pressed) cycle_button_state = DB_MAYBE_PRESSED;
+      if (cyc_pressed) cycle_button_state = DB_MAYBE_PRESSED;
       else cycle_button_state = DB_NOT_PRESSED;
       break;
     case DB_MAYBE_PRESSED:
-      if (pressed) {
-        main_menu_state = (main_menu_state == MM_BATTERY) ? MM_TIME : (main_menu_state + 1);
+      if (cyc_pressed) {
+        if (in_sub_menu) in_sub_menu = 0;
+        else main_menu_state = (main_menu_state == MM_BATTERY) ? MM_TIME : (main_menu_state + 1);
         SSH1106_Clear();
         cycle_button_state = DB_PRESSED;
       }
       else cycle_button_state = DB_NOT_PRESSED;
       break;
     case DB_PRESSED:
-      if (pressed) cycle_button_state = DB_PRESSED;
+      if (cyc_pressed) cycle_button_state = DB_PRESSED;
       else cycle_button_state = DB_MAYBE_NOT_PRESSED;
       break;
     case DB_MAYBE_NOT_PRESSED:
-      if (pressed) cycle_button_state = DB_PRESSED;
+      if (cyc_pressed) cycle_button_state = DB_PRESSED;
       else cycle_button_state = DB_NOT_PRESSED;
       break;
     default:
@@ -155,6 +159,9 @@ int main() {
   // Initialize OLED display
   SSH1106_Init();
 
+  // Initialize I3G4250D
+  init_i3g4250();
+
   // Time variables
   uint64_t uptime_ms = 0;
   uint32_t hours = 0;
@@ -166,11 +173,16 @@ int main() {
   sprintf(time_str, "%02u:%02u:%02u", hours, minutes, seconds);
   sprintf(prev_time_str, "%s", time_str);
 
+  // Other strings
+  char weather_str[20];
   char battery_str[20];
+  char gyro_x_str[20];
+  char gyro_y_str[20];
+  char gyro_z_str[20];
 
   while (true) {
 
-    update_main_menu();
+    update_menu();
     switch (main_menu_state) {
       case MM_TIME:
         sprintf(prev_time_str, "%s", time_str);
@@ -193,11 +205,42 @@ int main() {
           SSH1106_DrawPixel(phone_img[i][0], phone_img[i][1], 1);
         SSH1106_UpdateScreen();
         break;
+      case MM_WEATHER:
+        if (in_sub_menu) {
+          sprintf(weather_str, "Temp: %dC", read_temp());
+          SSH1106_GotoXY(10, 25);
+          SSH1106_Puts(weather_str, &Font_11x18, 1);
+        } else {
+          for (int i = 0; i < sizeof(weather_img)/sizeof(weather_img[0]); i++)
+            SSH1106_DrawPixel(weather_img[i][0], weather_img[i][1], 1);
+        }
+        SSH1106_UpdateScreen();
+        break;
       case MM_HEART_RATE:
         for (int i = 0; i < sizeof(heartrate_img)/sizeof(heartrate_img[0]); i++)
           SSH1106_DrawPixel(heartrate_img[i][0], heartrate_img[i][1], 1);
         SSH1106_UpdateScreen();
-      break;
+        break;
+      case MM_ACTIVITY:
+        if (in_sub_menu) {
+          for (int i = 0; i < 128; i++)
+            for (int j = 0; j < 64; j++)
+              SSH1106_DrawPixel(i, j, SSH1106_COLOR_BLACK);
+          sprintf(gyro_x_str, "X: %d", read_gyro_x());
+          sprintf(gyro_y_str, "Y: %d", read_gyro_y());
+          sprintf(gyro_z_str, "Z: %d", read_gyro_z());
+          SSH1106_GotoXY(10, 6);
+          SSH1106_Puts(gyro_x_str, &Font_11x18, 1);
+          SSH1106_GotoXY(10, 25);
+          SSH1106_Puts(gyro_y_str, &Font_11x18, 1);
+          SSH1106_GotoXY(10, 44);
+          SSH1106_Puts(gyro_z_str, &Font_11x18, 1);
+        } else {
+          for (int i = 0; i < sizeof(activity_img)/sizeof(activity_img[0]); i++)
+            SSH1106_DrawPixel(activity_img[i][0], activity_img[i][1], 1);
+        }
+        SSH1106_UpdateScreen();   
+        break;                                                                                 
       case MM_BATTERY:
         for (int i = 0; i < sizeof(battery_img)/sizeof(battery_img[0]); i++)
           SSH1106_DrawPixel(battery_img[i][0], battery_img[i][1], 1);

@@ -22,7 +22,7 @@ non_blank_pixels = []
 for y in range(scaled_image.height):
     for x in range(scaled_image.width):
         r, g, b, a = pixels[x, y]  # Extract alpha channel
-        if r != 255 and g != 255 and b != 255:
+        if a != 0:
             non_blank_pixels.append((x+args.x_offset, y+args.y_offset))  # Add x and y coordinates
 
 # Format the output as a C-style array
