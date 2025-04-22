@@ -39,6 +39,27 @@
 #define BATT_MIN 0
 #define BATT_MAX 100
 
+// Direct Digital Synthesis (DDS) parameters for DAC
+#define two32 4294967296.0  // 2^32 (a constant)
+#define Fs 50000
+#define DELAY 20 // 1/Fs (in microseconds)
+#define SOUND_DURATION 25000
+#define ALARM_NUM 0
+#define ALARM_IRQ TIMER_IRQ_0
+#define DAC_config_chan_A 0b0001000000000000
+#define sine_table_size 256
+volatile unsigned int STATE_0 = 0 ;
+volatile unsigned int count_0 = 0 ;
+volatile unsigned int phase_accum_main_0;
+volatile unsigned int phase_incr_main_0 = (400.0*two32)/Fs;
+volatile unsigned int sound_curr_freq = 0;
+float current_amplitude_0 = 1.0 ;
+float sin_table[sine_table_size];
+int DAC_output_0;
+uint16_t DAC_data_0;
+int twinkle_twinkle[] = {261, 261, 392, 392, 440, 440, 392, 349, 349, 329, 329, 293, 293, 261};
+int tt_idx = 0;
+
 typedef enum {
   MM_TIME,
   MM_PHONE,
@@ -59,6 +80,36 @@ debounce_state_t select_button_state = DB_NOT_PRESSED;
 debounce_state_t cycle_button_state = DB_NOT_PRESSED;
 int in_sub_menu = 0;
 
+static void alarm_irq(void) {
+  hw_clear_bits(&timer_hw->intr, 1u << ALARM_NUM);
+  timer_hw->alarm[ALARM_NUM] = timer_hw->timerawl + DELAY ;
+  if (STATE_0 == 0) {
+    if (main_menu_state == MM_PHONE && in_sub_menu) {
+      sound_curr_freq = twinkle_twinkle[tt_idx];
+      phase_incr_main_0 = (sound_curr_freq*two32)/Fs;
+      phase_accum_main_0 += phase_incr_main_0;
+      DAC_output_0 = (int)(current_amplitude_0 *
+        sin_table[phase_accum_main_0>>24]) + 2048;
+      DAC_data_0 = (DAC_config_chan_A | (DAC_output_0 & 0xffff));
+      spi_write16_blocking(SPI_PORT, &DAC_data_0, 1) ;
+      count_0 += 1 ;
+      if (count_0 == SOUND_DURATION) {
+        STATE_0 = 1 ;
+        count_0 = 0 ;
+        tt_idx = (tt_idx + 1) % (sizeof(twinkle_twinkle)/sizeof(twinkle_twinkle[0]));
+      }
+    }
+  }
+  else {
+    count_0 += 1 ;
+    if (count_0 == SOUND_DURATION) {
+      phase_accum_main_0 = 0 ;
+      STATE_0 = 0 ;
+      count_0 = 0 ;
+    }
+  }
+}
+
 void update_menu() {
   int sel_pressed = gpio_get(SELECT_BUTTON);
   switch (select_button_state) {
@@ -68,7 +119,7 @@ void update_menu() {
       break;
     case DB_MAYBE_PRESSED:
       if (sel_pressed) {
-        if (main_menu_state == MM_WEATHER || main_menu_state == MM_ACTIVITY) {
+        if (main_menu_state == MM_PHONE || main_menu_state == MM_WEATHER || main_menu_state == MM_ACTIVITY) {
           in_sub_menu = 1;
           SSH1106_Clear();
         }
@@ -174,11 +225,28 @@ int main() {
   sprintf(prev_time_str, "%s", time_str);
 
   // Other strings
+  char phone_str[20];
   char weather_str[20];
   char battery_str[20];
   char gyro_x_str[20];
   char gyro_y_str[20];
   char gyro_z_str[20];
+
+  // Build the sine lookup table
+  // scaled to produce values between 0 and 4096 (for 12-bit DAC)
+  int ii;
+  for (ii = 0; ii < sine_table_size; ii++) {
+    sin_table[ii] = 2047.0*sin((float)ii*6.283/(float)sine_table_size);
+  }
+
+  // Enable the interrupt for the alarm (we're using Alarm 0)
+  hw_set_bits(&timer_hw->inte, 1u << ALARM_NUM);
+  // Associate an interrupt handler with the ALARM_IRQ
+  irq_set_exclusive_handler(ALARM_IRQ, alarm_irq);
+  // Enable the alarm interrupt
+  irq_set_enabled(ALARM_IRQ, true);
+  // Write the lower 32 bits of the target time to the alarm register, arming it.
+  timer_hw->alarm[ALARM_NUM] = timer_hw->timerawl + DELAY;
 
   while (true) {
 
@@ -201,8 +269,14 @@ int main() {
         }
         break;
       case MM_PHONE:
-        for (int i = 0; i < sizeof(phone_img)/sizeof(phone_img[0]); i++)
-          SSH1106_DrawPixel(phone_img[i][0], phone_img[i][1], 1);
+        if (in_sub_menu) {
+          sprintf(phone_str, "Song!");
+          SSH1106_GotoXY(40, 25);
+          SSH1106_Puts(phone_str, &Font_11x18, 1);
+        } else {
+          for (int i = 0; i < sizeof(phone_img)/sizeof(phone_img[0]); i++)
+            SSH1106_DrawPixel(phone_img[i][0], phone_img[i][1], 1);
+        }
         SSH1106_UpdateScreen();
         break;
       case MM_WEATHER:
