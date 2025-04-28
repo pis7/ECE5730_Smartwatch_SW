@@ -15,15 +15,15 @@ if(WIN32)
 else()
     set(USERHOME $ENV{HOME})
 endif()
-set(sdkVersion 2.1.0)
-set(toolchainVersion 13_3_Rel1)
-set(picotoolVersion 2.1.0)
+set(sdkVersion 2.1.1)
+set(toolchainVersion 14_2_Rel1)
+set(picotoolVersion 2.1.1)
 set(picoVscode ${USERHOME}/.pico-sdk/cmake/pico-vscode.cmake)
 if (EXISTS ${picoVscode})
     include(${picoVscode})
 endif()
 # ====================================================================================
-set(PICO_BOARD pico CACHE STRING "Board type")
+set(PICO_BOARD pico_w CACHE STRING "Board type")
 
 # Pull in Raspberry Pi Pico SDK (must be before project)
 include(pico_sdk_import.cmake)
@@ -39,12 +39,19 @@ add_executable(ECE5730_Smartwatch_SW)
 
 add_compile_options(-Ofast)
 
+target_include_directories(ECE5730_Smartwatch_SW PRIVATE
+    ${CMAKE_CURRENT_LIST_DIR}
+    ${PICO_SDK_PATH}/lib/lwip/src/include
+    ${CMAKE_CURRENT_LIST_DIR}/ECE5730_Smartwatch_SW
+)
+
 # must match with executable name and source file names
 target_sources(ECE5730_Smartwatch_SW PRIVATE 
     ECE5730_Smartwatch_SW.c
     font_ssh1106.c 
     ssh1106.c
-    i3g4250d.c)
+    i3g4250d.c
+    wifi_udp.c)
 
 # must match with executable name
 target_link_libraries(ECE5730_Smartwatch_SW PRIVATE 
@@ -57,10 +64,19 @@ target_link_libraries(ECE5730_Smartwatch_SW PRIVATE
     hardware_adc 
     hardware_irq 
     hardware_spi 
+    hardware_timer
     hardware_clocks 
+    hardware_uart
     hardware_pll 
     hardware_pwm 
-    hardware_i2c)
+    hardware_i2c
+    pico_cyw43_arch_lwip_threadsafe_background
+    pico_cyw43_arch
+    pico_stdlib hardware_sync
+    )
 
 # must match with executable name
+pico_enable_stdio_usb(ECE5730_Smartwatch_SW 1) 
+pico_enable_stdio_uart(ECE5730_Smartwatch_SW 0)
+
 pico_add_extra_outputs(ECE5730_Smartwatch_SW)
