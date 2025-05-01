@@ -45,8 +45,7 @@ void MAX3010x_ReadFIFO(uint32_t *red, uint32_t *irValue) {
 }
 
 int main() {
-    // You must set up GPIO/I2C and a millisecond timer before this
-    MAX3010x_Init();
+    MAX3010x_Init(); // Set a timer!!
 
     while (1) {
         uint32_t red, irValue;
@@ -69,6 +68,6 @@ int main() {
             printf("Beat detected! IR = %lu, BPM = %.2f\n", irValue, beatAvg);
         }
 
-        delay_ms(10);  // 100Hz sampling
+        delay_ms(10);
     }
 }

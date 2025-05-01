@@ -1,10 +1,7 @@
 #include "i3g4250d.h"
-#define I3G4250_ADDR 0x69  // Or 0x68, depending on SDO pin
+#define I3G4250_ADDR 0x69 
 
-// Power on: normal mode, enable X/Y/Z
 i2c_write_reg(I3G4250_ADDR, 0x20, 0x0F);
-
-// Set 250 dps range
 i2c_write_reg(I3G4250_ADDR, 0x23, 0x00); 
 
 int16_t read_gyro_z() {
