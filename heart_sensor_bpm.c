@@ -11,14 +11,13 @@ uint32_t lastBeat = 0;
 extern void i2c_write_reg(uint8_t addr, uint8_t reg, uint8_t value);
 extern void i2c_read_multi(uint8_t addr, uint8_t reg, uint8_t *data, uint8_t len);
 extern void delay_ms(uint32_t ms);
-extern uint32_t millis();  // Timer giving system uptime in milliseconds
-
+extern uint32_t millis();  
 void MAX3010x_Init() {
     // Reset the sensor
     i2c_write_reg(MAX30105_I2C_ADDR, REG_MODE_CONFIG, MODE_RESET);
     delay_ms(100);
 
-    // Enable interrupts (optional)
+    // Enable interrupts
     i2c_write_reg(MAX30105_I2C_ADDR, REG_INTERRUPT_ENABLE_1, 0xC0);  // A_FULL + PPG Ready
 
     // Clear FIFO
@@ -26,7 +25,6 @@ void MAX3010x_Init() {
     i2c_write_reg(MAX30105_I2C_ADDR, REG_FIFO_RD_PTR, 0x00);
     i2c_write_reg(MAX30105_I2C_ADDR, REG_FIFO_OERVFLOW_COUNTER, 0x00);
 
-    // Configure SPO2 mode: 100Hz sample rate, 411us pulse width, 16-bit ADC
     uint8_t spo2_config = SPO2_SR_100 | SPO2_ADC_RANGE_4096 | SPO2_PW_411;
     i2c_write_reg(MAX30105_I2C_ADDR, REG_SPO2_CONFIG, spo2_config);
 
