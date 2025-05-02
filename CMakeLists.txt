@@ -51,7 +51,8 @@ target_sources(ECE5730_Smartwatch_SW PRIVATE
     font_ssh1106.c 
     ssh1106.c
     i3g4250d.c
-    wifi_udp.c)
+    wifi_udp.c
+    )
 
 # must match with executable name
 target_link_libraries(ECE5730_Smartwatch_SW PRIVATE 
@@ -63,7 +64,8 @@ target_link_libraries(ECE5730_Smartwatch_SW PRIVATE
     hardware_dma 
     hardware_adc 
     hardware_irq 
-    hardware_spi 
+    hardware_spi
+    hardware_rtc 
     hardware_timer
     hardware_clocks 
     hardware_uart
@@ -73,6 +75,7 @@ target_link_libraries(ECE5730_Smartwatch_SW PRIVATE
     pico_cyw43_arch_lwip_threadsafe_background
     pico_cyw43_arch
     pico_stdlib hardware_sync
+
     )
 
 # must match with executable name

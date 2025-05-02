@@ -11,7 +11,8 @@
 #include "pico/stdlib.h"
 #include "hardware/uart.h"
 #include "hardware/timer.h"
-// #include "pt_cornell_rp2040_v1_3.h"
+#include "hardware/rtc.h"
+
 #include "font_ssh1106.h"
 #include "ssh1106.h"
 #include "i3g4250d.h"
@@ -23,6 +24,7 @@
 #include "dat/activity_img.h"
 #include "dat/weather_img.h"
 #include "wifi_udp.h"
+#include "hardware/rtc.h"
 
 // Some macros for max/min/abs
 #define min(a, b) ((a < b) ? a : b)
@@ -63,6 +65,9 @@ int DAC_output_0;
 uint16_t DAC_data_0;
 int twinkle_twinkle[] = {261, 261, 392, 392, 440, 440, 392, 349, 349, 329, 329, 293, 293, 261};
 int tt_idx = 0;
+
+extern datetime_t ntp_time;
+static bool ntp_time_initialized = false;
 
 typedef enum
 {
@@ -251,15 +256,16 @@ int main()
   init_i3g4250();
 
   // Time variables
+  absolute_time_t last_time_update = get_absolute_time();
+
   uint64_t uptime_ms = 0;
   uint32_t hours = 0;
   uint32_t minutes = 0;
   uint32_t seconds = 0;
-  uint32_t prev_seconds = 0;
+  uint32_t prev_seconds = -1;
   char prev_time_str[20];
   char time_str[20];
   sprintf(time_str, "%02u:%02u:%02u", hours, minutes, seconds);
-  sprintf(prev_time_str, "%s", time_str);
 
   // Other strings
   char phone_str[20];
@@ -294,25 +300,66 @@ int main()
   {
 
     update_menu();
+
+    if (ntp_time_initialized)
+    {
+      if (absolute_time_diff_us(last_time_update, get_absolute_time()) >= 1000000)
+      {
+        last_time_update = get_absolute_time();
+
+        seconds++;
+        if (seconds >= 60)
+        {
+          seconds = 0;
+          minutes++;
+        }
+        if (minutes >= 60)
+        {
+          minutes = 0;
+          hours++;
+        }
+        if (hours >= 24)
+        {
+          hours = 0;
+        }
+        sprintf(time_str, "%02u:%02u:%02u", hours, minutes, seconds);
+
+        if (seconds != prev_seconds)
+        {
+          prev_seconds = seconds;
+
+          if (main_menu_state == MM_TIME)
+          {
+            SSH1106_GotoXY(25, 25);
+            SSH1106_Puts(prev_time_str, &Font_11x18, 0);
+            SSH1106_GotoXY(25, 25);
+            SSH1106_Puts(time_str, &Font_11x18, 1);
+
+            SSH1106_UpdateScreen();
+          }
+        }
+        sprintf(prev_time_str, "%s", time_str);
+      }
+    }
+
     switch (main_menu_state)
     {
     case MM_TIME:
-      sprintf(prev_time_str, "%s", time_str);
-      uptime_ms = time_us_64() / 1000;
-      hours = (uptime_ms / (1000 * 60 * 60)) % 24;
-      minutes = (uptime_ms / (1000 * 60)) % 60;
-      seconds = (uptime_ms / 1000) % 60;
-      sprintf(time_str, "%02u:%02u:%02u", hours, minutes, seconds);
-      if (seconds != prev_seconds)
+    {
+      if (!ntp_time_initialized && ntp_time_ready)
       {
+        datetime_t now;
+        get_current_ntp_time(&now);
+        hours = now.hour;
+        minutes = now.min;
+        seconds = now.sec;
         prev_seconds = seconds;
-        SSH1106_GotoXY(25, 25);
-        SSH1106_Puts(prev_time_str, &Font_11x18, 0);
-        SSH1106_GotoXY(25, 25);
-        SSH1106_Puts(time_str, &Font_11x18, 1);
-        SSH1106_UpdateScreen();
+        ntp_time_initialized = true;
+        last_time_update = get_absolute_time();
       }
+
       break;
+    }
     case MM_PHONE:
       if (in_sub_menu)
       {
