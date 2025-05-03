@@ -170,12 +170,12 @@ static PT_THREAD(protothread_send(struct pt *pt))
 // =======================
 // Public Functions (called by main app)
 
-void wifi_udp_init()
+int wifi_udp_init()
 {
   if (connectWifi(country, WIFI_SSID, WIFI_PASSWORD, auth))
   {
     printf("Failed WiFi connection.\n");
-    return;
+    return 1;
   }
 
   get_MAC_address(mac_address_str);
@@ -184,6 +184,7 @@ void wifi_udp_init()
   PT_SEM_INIT(&new_message, 0);
 
   udpecho_raw_init();
+  return 0;
 }
 
 void start_wifi_threads()

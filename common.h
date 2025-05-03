@@ -21,6 +21,7 @@
 #include "hardware/pio.h"
 #include "hardware/i2c.h"
 #include "hardware/spi.h"
+#include "hardware/clocks.h"
 
 // SPI configurations
 #define PIN_SCK  2

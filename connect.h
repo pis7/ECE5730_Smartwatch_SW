@@ -6,8 +6,8 @@
 #include "pico/cyw43_arch.h"
 
 // Wifi information
-#define WIFI_SSID "georg’s iPhone"
-#define WIFI_PASSWORD "Marioiscool57"
+#define WIFI_SSID "Parker’s iPhone"
+#define WIFI_PASSWORD "Temp123!"
 uint32_t country = CYW43_COUNTRY_USA;
 uint32_t auth = CYW43_AUTH_WPA2_MIXED_PSK;
 
@@ -23,7 +23,7 @@ int connectWifi(uint32_t country, const char *ssid, const char *pass, uint32_t a
   }
 
   // Make sure the LED is off
-  cyw43_arch_gpio_put(CYW43_WL_GPIO_LED_PIN, 0);
+  // cyw43_arch_gpio_put(CYW43_WL_GPIO_LED_PIN, 0);
 
   // Put the device into station mode
   cyw43_arch_enable_sta_mode();
@@ -38,7 +38,7 @@ int connectWifi(uint32_t country, const char *ssid, const char *pass, uint32_t a
   }
 
   // Use the LED to indicate connection success
-  cyw43_arch_gpio_put(CYW43_WL_GPIO_LED_PIN, 1);
+  // cyw43_arch_gpio_put(CYW43_WL_GPIO_LED_PIN, 1);
 
   // Report the IP, netmask, and gateway that we've been assigned
   printf("IP: %s\n", ip4addr_ntoa(netif_ip_addr4(netif_default)));

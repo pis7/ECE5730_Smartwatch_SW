@@ -18,11 +18,18 @@
 
 // Include custom images
 #include "dat/battery_img.h"
-#include "dat/phone_img.h"
+#include "dat/mic_img.h"
 #include "dat/heartrate_img.h"
 #include "dat/activity_img.h"
 #include "dat/weather_img.h"
+#include "dat/wifi_img.h"
+#include "dat/no_wifi_img.h"
+
+// Include WiFi library
 #include "wifi_udp.h"
+
+// Include microphone library
+#include "pdm_microphone.h"
 
 // Some macros for max/min/abs
 #define min(a, b) ((a < b) ? a : b)
@@ -46,7 +53,7 @@
 // Direct Digital Synthesis (DDS) parameters for DAC
 #define two32 4294967296.0 // 2^32 (a constant)
 #define Fs 50000
-#define DELAY 20 // 1/Fs (in microseconds)
+#define DELAY 125 // 1/8000 (in microseconds)
 #define SOUND_DURATION 25000
 #define ALARM_NUM 0
 #define ALARM_IRQ TIMER_IRQ_0
@@ -67,10 +74,10 @@ int tt_idx = 0;
 typedef enum
 {
   MM_TIME,
-  MM_PHONE,
   MM_WEATHER,
   MM_HEART_RATE,
   MM_ACTIVITY,
+  MM_VOICE,
   MM_BATTERY
 } main_menu_state_t;
 main_menu_state_t main_menu_state = MM_TIME;
@@ -86,42 +93,23 @@ debounce_state_t select_button_state = DB_NOT_PRESSED;
 debounce_state_t cycle_button_state = DB_NOT_PRESSED;
 int in_sub_menu = 0;
 
-static void alarm_irq(void)
-{
-  hw_clear_bits(&timer_hw->intr, 1u << ALARM_NUM);
-  timer_hw->alarm[ALARM_NUM] = timer_hw->timerawl + DELAY;
-  if (STATE_0 == 0)
-  {
-    if (main_menu_state == MM_PHONE && in_sub_menu)
-    {
-      sound_curr_freq = twinkle_twinkle[tt_idx];
-      phase_incr_main_0 = (sound_curr_freq * two32) / Fs;
-      phase_accum_main_0 += phase_incr_main_0;
-      DAC_output_0 = (int)(current_amplitude_0 *
-                           sin_table[phase_accum_main_0 >> 24]) +
-                     2048;
-      DAC_data_0 = (DAC_config_chan_A | (DAC_output_0 & 0xffff));
-      spi_write16_blocking(SPI_PORT, &DAC_data_0, 1);
-      count_0 += 1;
-      if (count_0 == SOUND_DURATION)
-      {
-        STATE_0 = 1;
-        count_0 = 0;
-        tt_idx = (tt_idx + 1) % (sizeof(twinkle_twinkle) / sizeof(twinkle_twinkle[0]));
-      }
-    }
-  }
-  else
-  {
-    count_0 += 1;
-    if (count_0 == SOUND_DURATION)
-    {
-      phase_accum_main_0 = 0;
-      STATE_0 = 0;
-      count_0 = 0;
-    }
-  }
-}
+// Mic config
+#define SAMPLE_RATE 8000
+#define SAMPLE_BUFFER_SIZE 8
+#define NUM_BURSTS 5 * (SAMPLE_RATE / SAMPLE_BUFFER_SIZE) // 5 second recording
+const struct pdm_microphone_config mic_config = {
+  .gpio_data = 7,
+  .gpio_clk = 6,
+  .pio = pio0,
+  .pio_sm = 0,
+  .sample_rate = SAMPLE_RATE,
+  .sample_buffer_size = SAMPLE_BUFFER_SIZE,
+};
+uint16_t mic_samp_buff[NUM_BURSTS][SAMPLE_BUFFER_SIZE];
+volatile int samp_idx = 0;
+volatile int samp_idx_inner = 0;
+
+int done_rec = 0;
 
 void update_menu()
 {
@@ -137,10 +125,13 @@ void update_menu()
   case DB_MAYBE_PRESSED:
     if (sel_pressed)
     {
-      if (main_menu_state == MM_PHONE || main_menu_state == MM_WEATHER || main_menu_state == MM_ACTIVITY)
+      if (main_menu_state == MM_WEATHER || main_menu_state == MM_ACTIVITY)
       {
         in_sub_menu = 1;
         SSH1106_Clear();
+      } else if (main_menu_state == MM_VOICE) {
+        in_sub_menu = 1;
+        done_rec = 0;
       }
       select_button_state = DB_PRESSED;
     }
@@ -176,9 +167,10 @@ void update_menu()
   case DB_MAYBE_PRESSED:
     if (cyc_pressed)
     {
-      if (in_sub_menu)
+      if (in_sub_menu) {
         in_sub_menu = 0;
-      else
+        done_rec = 0;
+      } else
         main_menu_state = (main_menu_state == MM_BATTERY) ? MM_TIME : (main_menu_state + 1);
       SSH1106_Clear();
       cycle_button_state = DB_PRESSED;
@@ -211,6 +203,10 @@ int map_batt(int input, int input_min, int input_max, int output_min, int output
   return output;
 }
 
+void on_pdm_samples_ready()
+{
+  pdm_microphone_read(mic_samp_buff[samp_idx++], SAMPLE_BUFFER_SIZE);
+}
 int main()
 {
 
@@ -250,6 +246,10 @@ int main()
   // Initialize I3G4250D
   init_i3g4250();
 
+  // Initialize microphone
+  pdm_microphone_init(&mic_config);
+  pdm_microphone_set_samples_ready_handler(on_pdm_samples_ready);
+
   // Time variables
   uint64_t uptime_ms = 0;
   uint32_t hours = 0;
@@ -277,18 +277,31 @@ int main()
     sin_table[ii] = 2047.0 * sin((float)ii * 6.283 / (float)sine_table_size);
   }
 
-  // Enable the interrupt for the alarm (we're using Alarm 0)
-  hw_set_bits(&timer_hw->inte, 1u << ALARM_NUM);
-  // Associate an interrupt handler with the ALARM_IRQ
-  irq_set_exclusive_handler(ALARM_IRQ, alarm_irq);
-  // Enable the alarm interrupt
-  irq_set_enabled(ALARM_IRQ, true);
-  // Write the lower 32 bits of the target time to the alarm register, arming it.
-  timer_hw->alarm[ALARM_NUM] = timer_hw->timerawl + DELAY;
-
-  // Initialize the UDP server
-  wifi_udp_init();
+  // Connect to WiFi
+  SSH1106_GotoXY(20, 15);
+  SSH1106_Puts("Powering", &Font_11x18, 1);
+  SSH1106_GotoXY(20, 35);
+  SSH1106_Puts("   Up   ", &Font_11x18, 1);
+  SSH1106_UpdateScreen();
+  int connect_status = wifi_udp_init();
   start_wifi_threads();
+  SSH1106_Clear();
+
+  if (!connect_status) {
+    SSH1106_GotoXY(20, 15);
+    SSH1106_Puts(" Connect ", &Font_11x18, 1);
+    SSH1106_GotoXY(20, 35);
+    SSH1106_Puts(" Success ", &Font_11x18, 1);
+    SSH1106_UpdateScreen();
+  } else {
+    SSH1106_GotoXY(20, 15);
+    SSH1106_Puts(" Connect ", &Font_11x18, 1);
+    SSH1106_GotoXY(20, 35);
+    SSH1106_Puts("   Fail  ", &Font_11x18, 1);
+    SSH1106_UpdateScreen();
+  }
+  sleep_ms(2000);
+  SSH1106_Clear();
 
   while (true)
   {
@@ -306,25 +319,21 @@ int main()
       if (seconds != prev_seconds)
       {
         prev_seconds = seconds;
-        SSH1106_GotoXY(25, 25);
+        SSH1106_GotoXY(25, 10);
         SSH1106_Puts(prev_time_str, &Font_11x18, 0);
-        SSH1106_GotoXY(25, 25);
+        SSH1106_GotoXY(25, 10);
         SSH1106_Puts(time_str, &Font_11x18, 1);
-        SSH1106_UpdateScreen();
       }
-      break;
-    case MM_PHONE:
-      if (in_sub_menu)
-      {
-        sprintf(phone_str, "Song!");
-        SSH1106_GotoXY(40, 25);
-        SSH1106_Puts(phone_str, &Font_11x18, 1);
+      if (!connect_status) {
+        for (int i = 0; i < sizeof(wifi_img) / sizeof(wifi_img[0]); i++)
+          SSH1106_DrawPixel(wifi_img[i][0], wifi_img[i][1], 1);
+      } else {
+        for (int i = 0; i < sizeof(no_wifi_img) / sizeof(no_wifi_img[0]); i++)
+          SSH1106_DrawPixel(no_wifi_img[i][0], no_wifi_img[i][1], 1);
       }
-      else
-      {
-        for (int i = 0; i < sizeof(phone_img) / sizeof(phone_img[0]); i++)
-          SSH1106_DrawPixel(phone_img[i][0], phone_img[i][1], 1);
-      }
+      sprintf(battery_str, "%02d%%", map_batt(adc_read(), ADC_MIN, ADC_MAX, BATT_MIN, BATT_MAX));
+      SSH1106_GotoXY(80, 40);
+      SSH1106_Puts(battery_str, &Font_11x18, 1);
       SSH1106_UpdateScreen();
       break;
     case MM_WEATHER:
@@ -369,6 +378,48 @@ int main()
       }
       SSH1106_UpdateScreen();
       break;
+    case MM_VOICE:
+        if (in_sub_menu)
+        {
+          if (!done_rec) {
+            SSH1106_Clear();
+            sprintf(phone_str, "Recording");
+            SSH1106_GotoXY(20, 25);
+            SSH1106_Puts(phone_str, &Font_11x18, 1); 
+            SSH1106_UpdateScreen();
+            samp_idx = 0;
+            pdm_microphone_start();
+            while (samp_idx < NUM_BURSTS) { tight_loop_contents(); }
+            pdm_microphone_stop();
+            SSH1106_Clear();
+            sprintf(phone_str, "Playback");
+            SSH1106_GotoXY(20, 25);
+            SSH1106_Puts(phone_str, &Font_11x18, 1); 
+            SSH1106_UpdateScreen();
+            samp_idx = 0;
+            samp_idx_inner = 0;
+            while (samp_idx < NUM_BURSTS) {
+              uint16_t dac_value = ((mic_samp_buff[samp_idx][samp_idx_inner++] + 32768) >> 4) & 0xFFF;
+              DAC_data_0 = (DAC_config_chan_A | dac_value);
+              spi_write16_blocking(SPI_PORT, &DAC_data_0, 1);
+              if (samp_idx_inner == SAMPLE_BUFFER_SIZE) {
+                samp_idx_inner = 0;
+                samp_idx++;
+              }
+              sleep_us(DELAY);
+            }
+            samp_idx = 0;
+            samp_idx_inner = 0;
+            done_rec = 1;
+          }
+        }
+        else
+        {
+          for (int i = 0; i < sizeof(mic_img) / sizeof(mic_img[0]); i++)
+            SSH1106_DrawPixel(mic_img[i][0], mic_img[i][1], 1);
+        }
+        SSH1106_UpdateScreen();
+        break;
     case MM_BATTERY:
       for (int i = 0; i < sizeof(battery_img) / sizeof(battery_img[0]); i++)
         SSH1106_DrawPixel(battery_img[i][0], battery_img[i][1], 1);

@@ -39,6 +39,9 @@ add_executable(ECE5730_Smartwatch_SW)
 
 add_compile_options(-Ofast)
 
+# Generate PIO header
+pico_generate_pio_header(ECE5730_Smartwatch_SW ${CMAKE_CURRENT_LIST_DIR}/pdm_microphone.pio)
+
 target_include_directories(ECE5730_Smartwatch_SW PRIVATE
     ${CMAKE_CURRENT_LIST_DIR}
     ${PICO_SDK_PATH}/lib/lwip/src/include
@@ -51,7 +54,10 @@ target_sources(ECE5730_Smartwatch_SW PRIVATE
     font_ssh1106.c 
     ssh1106.c
     i3g4250d.c
-    wifi_udp.c)
+    wifi_udp.c
+    OpenPDMFilter.c
+    pdm_microphone.c
+    )
 
 # must match with executable name
 target_link_libraries(ECE5730_Smartwatch_SW PRIVATE 

@@ -6,6 +6,8 @@ from PIL import Image
 parser = argparse.ArgumentParser(description="Extract non-blank pixels from an image and output a C array.")
 parser.add_argument("image_file", type=str, help="Path to the image file")
 parser.add_argument("output_file", type=str, help="Path to the output C file")
+parser.add_argument("x_scale", type=int, help="Scale factor for x coordinates")
+parser.add_argument("y_scale", type=int, help="Scale factor for y coordinates")
 parser.add_argument("x_offset", type=int, help="X offset for pixel coordinates")
 parser.add_argument("y_offset", type=int, help="Y offset for pixel coordinates")
 args = parser.parse_args()
@@ -14,7 +16,7 @@ args = parser.parse_args()
 image = Image.open(args.image_file).convert("RGBA")
 
 # Scale the image to 48x48
-scaled_image = image.resize((48, 48), Image.NEAREST)  # Maintain pixelated style
+scaled_image = image.resize((args.x_scale, args.y_scale), Image.NEAREST)  # Maintain pixelated style
 pixels = scaled_image.load()
 
 # Extract non-blank (non-transparent) pixel coordinates
