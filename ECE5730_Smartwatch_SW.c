@@ -22,7 +22,13 @@
 #include "dat/heartrate_img.h"
 #include "dat/activity_img.h"
 #include "dat/weather_img.h"
+
+// Wifi library
 #include "wifi_udp.h"
+
+// Heart rate library
+#include "MAX30105_registers.h"
+#include "heart_sensor_bpm.h" 
 
 // Some macros for max/min/abs
 #define min(a, b) ((a < b) ? a : b)
@@ -63,6 +69,29 @@ int DAC_output_0;
 uint16_t DAC_data_0;
 int twinkle_twinkle[] = {261, 261, 392, 392, 440, 440, 392, 349, 349, 329, 329, 293, 293, 261};
 int tt_idx = 0;
+
+// Heart rate variables
+#define RATE_SIZE 4
+float rates[RATE_SIZE];
+uint8_t rateSpot = 0;
+uint32_t lastBeat = 0;
+
+int16_t IR_AC_Max = 20;
+int16_t IR_AC_Min = -20;
+
+int16_t IR_AC_Signal_Current = 0;
+int16_t IR_AC_Signal_Previous;
+int16_t IR_AC_Signal_min = 0;
+int16_t IR_AC_Signal_max = 0;
+int16_t IR_Average_Estimated;
+
+int16_t positiveEdge = 0;
+int16_t negativeEdge = 0;
+int32_t ir_avg_reg = 0;
+
+int16_t cbuf[32];
+uint8_t offset = 0;
+static const uint16_t FIRCoeffs[12] = {172, 321, 579, 927, 1360, 1858, 2390, 2916, 3391, 3768, 4012, 4096};
 
 typedef enum
 {
@@ -137,7 +166,7 @@ void update_menu()
   case DB_MAYBE_PRESSED:
     if (sel_pressed)
     {
-      if (main_menu_state == MM_PHONE || main_menu_state == MM_WEATHER || main_menu_state == MM_ACTIVITY)
+      if (main_menu_state == MM_PHONE || main_menu_state == MM_WEATHER || main_menu_state == MM_ACTIVITY || main_menu_state == MM_HEART_RATE)
       {
         in_sub_menu = 1;
         SSH1106_Clear();
@@ -250,6 +279,9 @@ int main()
   // Initialize I3G4250D
   init_i3g4250();
 
+  // Heart rate sensor initialization
+  MAX3010x_Init();
+
   // Time variables
   uint64_t uptime_ms = 0;
   uint32_t hours = 0;
@@ -268,6 +300,7 @@ int main()
   char gyro_x_str[20];
   char gyro_y_str[20];
   char gyro_z_str[20];
+  char hr_str[20];
 
   // Build the sine lookup table
   // scaled to produce values between 0 and 4096 (for 12-bit DAC)
@@ -342,8 +375,40 @@ int main()
       SSH1106_UpdateScreen();
       break;
     case MM_HEART_RATE:
-      for (int i = 0; i < sizeof(heartrate_img) / sizeof(heartrate_img[0]); i++)
-        SSH1106_DrawPixel(heartrate_img[i][0], heartrate_img[i][1], 1);
+      if (in_sub_menu)
+      {
+        uint32_t red, irValue;
+        MAX3010x_ReadFIFO(&red, &irValue);
+
+        if (checkForBeat(irValue, IR_AC_Max, IR_AC_Min,
+                         IR_AC_Signal_Current, &IR_AC_Signal_Previous,
+                         IR_AC_Signal_min, IR_AC_Signal_max, IR_Average_Estimated,
+                         positiveEdge, negativeEdge, ir_avg_reg,
+                         cbuf, offset, FIRCoeffs)) {
+            uint32_t now = to_ms_since_boot(get_absolute_time());
+            uint32_t delta = now - lastBeat;
+            lastBeat = now;
+
+            float beatsPerMinute = 60000.0f / delta;
+            rates[rateSpot++] = beatsPerMinute;
+            if (rateSpot >= RATE_SIZE) rateSpot = 0;
+
+            float beatAvg = 0;
+            for (int i = 0; i < RATE_SIZE; i++) 
+                beatAvg += rates[i];
+            beatAvg /= RATE_SIZE;
+
+            SSH1106_GotoXY(10, 25);
+            sprintf(hr_str, "BPM: %.2f", beatAvg);
+            SSH1106_Puts(hr_str, &Font_11x18, 1);
+
+            // printf("Beat detected! IR = %lu, BPM = %.2f\n", irValue, beatAvg);
+        }
+        sleep_ms(10);
+      } else {
+        for (int i = 0; i < sizeof(heartrate_img) / sizeof(heartrate_img[0]); i++)
+          SSH1106_DrawPixel(heartrate_img[i][0], heartrate_img[i][1], 1);
+      }
       SSH1106_UpdateScreen();
       break;
     case MM_ACTIVITY:

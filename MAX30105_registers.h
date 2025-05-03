@@ -2,12 +2,12 @@
 #define MAX30105_REGISTERS_H
 
 // I2C address for MAX30105/MAX30102 (default)
-#define MAX30105_I2C_ADDR       0x57
+#define MAX30105_I2C_ADDR          0x57
 
 // Interrupt Registers
 // #define REG_INTERRUPT_STATUS_1          0x00
 // #define REG_INTERRUPT_STATUS_2          0x01
-#define REG_INTERRUPT_ENABLE_1          0x02
+#define REG_INTERRUPT_ENABLE_1     0x02
 // #define REG_INTERRUPT_ENABLE_2          0x03
 
 // FIFO Registers
@@ -43,7 +43,7 @@
 
 // SPO2_CONFIG (0x0A) bits
 // #define SPO2_ADC_RANGE_2048          (0 << 5)
-#define SPO2_ADC_RANGE_4096          (1 << 5)
+#define SPO2_ADC_RANGE_4096        (1 << 5)
 // #define SPO2_ADC_RANGE_8192          (2 << 5)
 // #define SPO2_ADC_RANGE_16384         (3 << 5)
 

@@ -51,7 +51,9 @@ target_sources(ECE5730_Smartwatch_SW PRIVATE
     font_ssh1106.c 
     ssh1106.c
     i3g4250d.c
-    wifi_udp.c)
+    wifi_udp.c
+    heart_sensor_bpm.c
+    )
 
 # must match with executable name
 target_link_libraries(ECE5730_Smartwatch_SW PRIVATE 
