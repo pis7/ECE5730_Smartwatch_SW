@@ -6,8 +6,8 @@
 #include "pico/cyw43_arch.h"
 
 // Wifi information
-#define WIFI_SSID "Parker’s iPhone"
-#define WIFI_PASSWORD "Temp123!"
+#define WIFI_SSID "georg’s iPhone"
+#define WIFI_PASSWORD "Marioiscool57"
 uint32_t country = CYW43_COUNTRY_USA;
 uint32_t auth = CYW43_AUTH_WPA2_MIXED_PSK;
 

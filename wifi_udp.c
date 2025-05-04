@@ -6,6 +6,7 @@
 // LWIP libraries
 #include "lwip/pbuf.h"
 #include "lwip/udp.h"
+#include "lwip/dns.h"
 
 // Pico SDK hardware support libraries
 #include "hardware/sync.h"
@@ -24,12 +25,36 @@
 #include "pico/cyw43_arch.h"
 #include "lwip/netif.h"
 
+// NTP Stuff
+#include "hardware/rtc.h"
+#include "pico/util/datetime.h"
+#include <time.h>
+
+#define NTP_PORT 123
+#define NTP_SERVER "pool.ntp.org"
+#define NTP_PACKET_SIZE 48
+#define NTP_UNIX_OFFSET 2208988800u
+
+bool ntp_time_ready = false;
+
+typedef struct
+{
+  struct udp_pcb *pcb;
+  ip_addr_t ntp_server_ip;
+  uint8_t ntp_request[NTP_PACKET_SIZE];
+} NTP_T;
+
+static NTP_T ntp;
+void update_ntp_time(datetime_t *ntp_time);
+
 // Destination port and IP address
 #define UDP_PORT 1234
 #define BEACON_TARGET "172.20.10.2"
 
 // Maximum length of our message
 #define BEACON_MSG_LEN_MAX 127
+
+static datetime_t current_ntp_time = {0};
 
 // =======================
 // Global Variables
@@ -102,6 +127,109 @@ static void get_MAC_address(char *mac)
   sprintf(mac, "%02X:%02X:%02X:%02X:%02X:%02X",
           mac_addr[0], mac_addr[1], mac_addr[2],
           mac_addr[3], mac_addr[4], mac_addr[5]);
+}
+
+// NTP Functions:
+void ntp_send_request(void)
+{
+  memset(ntp.ntp_request, 0, NTP_PACKET_SIZE);
+  ntp.ntp_request[0] = 0b11100011; // LI, Version, Mode
+
+  struct pbuf *p = pbuf_alloc(PBUF_TRANSPORT, NTP_PACKET_SIZE, PBUF_RAM);
+  if (!p)
+    return;
+
+  memcpy(p->payload, ntp.ntp_request, NTP_PACKET_SIZE);
+  udp_sendto(ntp.pcb, p, &ntp.ntp_server_ip, NTP_PORT);
+  pbuf_free(p);
+}
+
+static void dns_callback(const char *name, const ip_addr_t *ipaddr, void *arg)
+{
+  if (ipaddr)
+  {
+    ntp.ntp_server_ip = *ipaddr;
+    ntp_send_request();
+  }
+  else
+  {
+    printf("DNS resolution failed for %s\n", name);
+  }
+}
+
+void ntp_recv(void *arg, struct udp_pcb *pcb, struct pbuf *p,
+              const ip_addr_t *addr, u16_t port)
+{
+  if (p && p->len >= NTP_PACKET_SIZE)
+  {
+    uint8_t *payload = (uint8_t *)p->payload;
+    uint32_t seconds_since_1900 =
+        (payload[40] << 24) | (payload[41] << 16) |
+        (payload[42] << 8) | payload[43];
+
+    time_t unix_time = seconds_since_1900 - NTP_UNIX_OFFSET;
+
+    int timezone_offset_hours = -4;
+    unix_time += timezone_offset_hours * 3600;
+
+    struct tm *utc = gmtime(&unix_time);
+    datetime_t dt = {
+        .year = utc->tm_year + 1900,
+        .month = utc->tm_mon + 1,
+        .day = utc->tm_mday,
+        .hour = utc->tm_hour,
+        .min = utc->tm_min,
+        .sec = utc->tm_sec,
+    };
+
+    update_ntp_time(&dt);
+    printf("NTP time synced: %04d-%02d-%02d %02d:%02d:%02d\n",
+           dt.year, dt.month, dt.day, dt.hour, dt.min, dt.sec);
+  }
+  pbuf_free(p);
+}
+
+void ntp_init(void)
+{
+  ntp.pcb = udp_new();
+  if (!ntp.pcb)
+  {
+    printf("Failed to create PCB\n");
+    return;
+  }
+  udp_recv(ntp.pcb, ntp_recv, NULL);
+
+  err_t res = dns_gethostbyname(NTP_SERVER, &ntp.ntp_server_ip, dns_callback, NULL);
+  if (res == ERR_OK)
+  {
+    // DNS resolved immediately
+    ntp_send_request();
+  }
+  else if (res == ERR_INPROGRESS)
+  {
+    printf("DNS lookup happening");
+  }
+  else
+  {
+    printf("DNS lookup failed");
+  }
+}
+
+void update_ntp_time(datetime_t *ntp_time)
+{
+  if (ntp_time)
+  {
+    current_ntp_time = *ntp_time;
+    ntp_time_ready = true;
+  }
+}
+
+void get_current_ntp_time(datetime_t *out_time)
+{
+  if (out_time)
+  {
+    *out_time = current_ntp_time;
+  }
 }
 
 // =======================
@@ -184,6 +312,8 @@ int wifi_udp_init()
   PT_SEM_INIT(&new_message, 0);
 
   udpecho_raw_init();
+
+  ntp_init();
   return 0;
 }
 

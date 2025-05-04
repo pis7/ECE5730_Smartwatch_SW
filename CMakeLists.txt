@@ -70,6 +70,7 @@ target_link_libraries(ECE5730_Smartwatch_SW PRIVATE
     hardware_adc 
     hardware_irq 
     hardware_spi 
+    hardware_rtc
     hardware_timer
     hardware_clocks 
     hardware_uart

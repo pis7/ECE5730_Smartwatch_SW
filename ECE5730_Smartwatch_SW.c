@@ -27,6 +27,7 @@
 
 // Include WiFi library
 #include "wifi_udp.h"
+#include "hardware/rtc.h"
 
 // Include microphone library
 #include "pdm_microphone.h"
@@ -71,6 +72,9 @@ uint16_t DAC_data_0;
 int twinkle_twinkle[] = {261, 261, 392, 392, 440, 440, 392, 349, 349, 329, 329, 293, 293, 261};
 int tt_idx = 0;
 
+extern datetime_t ntp_time;
+static bool ntp_time_initialized = false;
+
 typedef enum
 {
   MM_TIME,
@@ -98,12 +102,12 @@ int in_sub_menu = 0;
 #define SAMPLE_BUFFER_SIZE 8
 #define NUM_BURSTS 5 * (SAMPLE_RATE / SAMPLE_BUFFER_SIZE) // 5 second recording
 const struct pdm_microphone_config mic_config = {
-  .gpio_data = 7,
-  .gpio_clk = 6,
-  .pio = pio0,
-  .pio_sm = 0,
-  .sample_rate = SAMPLE_RATE,
-  .sample_buffer_size = SAMPLE_BUFFER_SIZE,
+    .gpio_data = 7,
+    .gpio_clk = 6,
+    .pio = pio0,
+    .pio_sm = 0,
+    .sample_rate = SAMPLE_RATE,
+    .sample_buffer_size = SAMPLE_BUFFER_SIZE,
 };
 uint16_t mic_samp_buff[NUM_BURSTS][SAMPLE_BUFFER_SIZE];
 volatile int samp_idx = 0;
@@ -129,7 +133,9 @@ void update_menu()
       {
         in_sub_menu = 1;
         SSH1106_Clear();
-      } else if (main_menu_state == MM_VOICE) {
+      }
+      else if (main_menu_state == MM_VOICE)
+      {
         in_sub_menu = 1;
         done_rec = 0;
       }
@@ -167,10 +173,12 @@ void update_menu()
   case DB_MAYBE_PRESSED:
     if (cyc_pressed)
     {
-      if (in_sub_menu) {
+      if (in_sub_menu)
+      {
         in_sub_menu = 0;
         done_rec = 0;
-      } else
+      }
+      else
         main_menu_state = (main_menu_state == MM_BATTERY) ? MM_TIME : (main_menu_state + 1);
       SSH1106_Clear();
       cycle_button_state = DB_PRESSED;
@@ -250,12 +258,14 @@ int main()
   pdm_microphone_init(&mic_config);
   pdm_microphone_set_samples_ready_handler(on_pdm_samples_ready);
 
+  absolute_time_t last_time_update = get_absolute_time();
+
   // Time variables
   uint64_t uptime_ms = 0;
   uint32_t hours = 0;
   uint32_t minutes = 0;
   uint32_t seconds = 0;
-  uint32_t prev_seconds = 0;
+  uint32_t prev_seconds = -1;
   char prev_time_str[20];
   char time_str[20];
   sprintf(time_str, "%02u:%02u:%02u", hours, minutes, seconds);
@@ -287,13 +297,16 @@ int main()
   start_wifi_threads();
   SSH1106_Clear();
 
-  if (!connect_status) {
+  if (!connect_status)
+  {
     SSH1106_GotoXY(20, 15);
     SSH1106_Puts(" Connect ", &Font_11x18, 1);
     SSH1106_GotoXY(20, 35);
     SSH1106_Puts(" Success ", &Font_11x18, 1);
     SSH1106_UpdateScreen();
-  } else {
+  }
+  else
+  {
     SSH1106_GotoXY(20, 15);
     SSH1106_Puts(" Connect ", &Font_11x18, 1);
     SSH1106_GotoXY(20, 35);
@@ -307,35 +320,66 @@ int main()
   {
 
     update_menu();
+
+    if (ntp_time_initialized)
+    {
+      if (absolute_time_diff_us(last_time_update, get_absolute_time()) >= 1000000)
+      {
+        last_time_update = get_absolute_time();
+
+        seconds++;
+        if (seconds >= 60)
+        {
+          seconds = 0;
+          minutes++;
+        }
+        if (minutes >= 60)
+        {
+          minutes = 0;
+          hours++;
+        }
+        if (hours >= 24)
+        {
+          hours = 0;
+        }
+        sprintf(time_str, "%02u:%02u:%02u", hours, minutes, seconds);
+
+        if (seconds != prev_seconds)
+        {
+          prev_seconds = seconds;
+
+          if (main_menu_state == MM_TIME)
+          {
+            SSH1106_GotoXY(25, 25);
+            SSH1106_Puts(prev_time_str, &Font_11x18, 0);
+            SSH1106_GotoXY(25, 25);
+            SSH1106_Puts(time_str, &Font_11x18, 1);
+
+            SSH1106_UpdateScreen();
+          }
+        }
+        sprintf(prev_time_str, "%s", time_str);
+      }
+    }
+
     switch (main_menu_state)
     {
     case MM_TIME:
-      sprintf(prev_time_str, "%s", time_str);
-      uptime_ms = time_us_64() / 1000;
-      hours = (uptime_ms / (1000 * 60 * 60)) % 24;
-      minutes = (uptime_ms / (1000 * 60)) % 60;
-      seconds = (uptime_ms / 1000) % 60;
-      sprintf(time_str, "%02u:%02u:%02u", hours, minutes, seconds);
-      if (seconds != prev_seconds)
+    {
+      if (!ntp_time_initialized && ntp_time_ready)
       {
+        datetime_t now;
+        get_current_ntp_time(&now);
+        hours = now.hour;
+        minutes = now.min;
+        seconds = now.sec;
         prev_seconds = seconds;
-        SSH1106_GotoXY(25, 10);
-        SSH1106_Puts(prev_time_str, &Font_11x18, 0);
-        SSH1106_GotoXY(25, 10);
-        SSH1106_Puts(time_str, &Font_11x18, 1);
+        ntp_time_initialized = true;
+        last_time_update = get_absolute_time();
       }
-      if (!connect_status) {
-        for (int i = 0; i < sizeof(wifi_img) / sizeof(wifi_img[0]); i++)
-          SSH1106_DrawPixel(wifi_img[i][0], wifi_img[i][1], 1);
-      } else {
-        for (int i = 0; i < sizeof(no_wifi_img) / sizeof(no_wifi_img[0]); i++)
-          SSH1106_DrawPixel(no_wifi_img[i][0], no_wifi_img[i][1], 1);
-      }
-      sprintf(battery_str, "%02d%%", map_batt(adc_read(), ADC_MIN, ADC_MAX, BATT_MIN, BATT_MAX));
-      SSH1106_GotoXY(80, 40);
-      SSH1106_Puts(battery_str, &Font_11x18, 1);
-      SSH1106_UpdateScreen();
+
       break;
+    }
     case MM_WEATHER:
       if (in_sub_menu)
       {
@@ -379,47 +423,53 @@ int main()
       SSH1106_UpdateScreen();
       break;
     case MM_VOICE:
-        if (in_sub_menu)
+      if (in_sub_menu)
+      {
+        if (!done_rec)
         {
-          if (!done_rec) {
-            SSH1106_Clear();
-            sprintf(phone_str, "Recording");
-            SSH1106_GotoXY(20, 25);
-            SSH1106_Puts(phone_str, &Font_11x18, 1); 
-            SSH1106_UpdateScreen();
-            samp_idx = 0;
-            pdm_microphone_start();
-            while (samp_idx < NUM_BURSTS) { tight_loop_contents(); }
-            pdm_microphone_stop();
-            SSH1106_Clear();
-            sprintf(phone_str, "Playback");
-            SSH1106_GotoXY(20, 25);
-            SSH1106_Puts(phone_str, &Font_11x18, 1); 
-            SSH1106_UpdateScreen();
-            samp_idx = 0;
-            samp_idx_inner = 0;
-            while (samp_idx < NUM_BURSTS) {
-              uint16_t dac_value = ((mic_samp_buff[samp_idx][samp_idx_inner++] + 32768) >> 4) & 0xFFF;
-              DAC_data_0 = (DAC_config_chan_A | dac_value);
-              spi_write16_blocking(SPI_PORT, &DAC_data_0, 1);
-              if (samp_idx_inner == SAMPLE_BUFFER_SIZE) {
-                samp_idx_inner = 0;
-                samp_idx++;
-              }
-              sleep_us(DELAY);
-            }
-            samp_idx = 0;
-            samp_idx_inner = 0;
-            done_rec = 1;
+          SSH1106_Clear();
+          sprintf(phone_str, "Recording");
+          SSH1106_GotoXY(20, 25);
+          SSH1106_Puts(phone_str, &Font_11x18, 1);
+          SSH1106_UpdateScreen();
+          samp_idx = 0;
+          pdm_microphone_start();
+          while (samp_idx < NUM_BURSTS)
+          {
+            tight_loop_contents();
           }
+          pdm_microphone_stop();
+          SSH1106_Clear();
+          sprintf(phone_str, "Playback");
+          SSH1106_GotoXY(20, 25);
+          SSH1106_Puts(phone_str, &Font_11x18, 1);
+          SSH1106_UpdateScreen();
+          samp_idx = 0;
+          samp_idx_inner = 0;
+          while (samp_idx < NUM_BURSTS)
+          {
+            uint16_t dac_value = ((mic_samp_buff[samp_idx][samp_idx_inner++] + 32768) >> 4) & 0xFFF;
+            DAC_data_0 = (DAC_config_chan_A | dac_value);
+            spi_write16_blocking(SPI_PORT, &DAC_data_0, 1);
+            if (samp_idx_inner == SAMPLE_BUFFER_SIZE)
+            {
+              samp_idx_inner = 0;
+              samp_idx++;
+            }
+            sleep_us(DELAY);
+          }
+          samp_idx = 0;
+          samp_idx_inner = 0;
+          done_rec = 1;
         }
-        else
-        {
-          for (int i = 0; i < sizeof(mic_img) / sizeof(mic_img[0]); i++)
-            SSH1106_DrawPixel(mic_img[i][0], mic_img[i][1], 1);
-        }
-        SSH1106_UpdateScreen();
-        break;
+      }
+      else
+      {
+        for (int i = 0; i < sizeof(mic_img) / sizeof(mic_img[0]); i++)
+          SSH1106_DrawPixel(mic_img[i][0], mic_img[i][1], 1);
+      }
+      SSH1106_UpdateScreen();
+      break;
     case MM_BATTERY:
       for (int i = 0; i < sizeof(battery_img) / sizeof(battery_img[0]); i++)
         SSH1106_DrawPixel(battery_img[i][0], battery_img[i][1], 1);
