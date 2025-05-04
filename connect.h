@@ -6,13 +6,17 @@
 #include "pico/cyw43_arch.h"
 
 // Wifi information
-#define WIFI_SSID "georg’s iPhone"
-#define WIFI_PASSWORD "Marioiscool57"
+// #define WIFI_SSID "georg’s iPhone"
+// #define WIFI_PASSWORD "Marioiscool57"
+
+#define WIFI_SSID "CTT-WIFI"
+#define WIFI_PASSWORD "5FBUMP4E"
+
 uint32_t country = CYW43_COUNTRY_USA;
 uint32_t auth = CYW43_AUTH_WPA2_MIXED_PSK;
 
 // Function for connecting to a WiFi access point
-int connectWifi(uint32_t country, const char *ssid, const char *pass, uint32_t auth)
+int connectWifi(uint32_t country, const char *ssid, const char *pass, uint32_t auth, char** ip)
 {
 
   // Initialize the hardware
@@ -44,6 +48,7 @@ int connectWifi(uint32_t country, const char *ssid, const char *pass, uint32_t a
   printf("IP: %s\n", ip4addr_ntoa(netif_ip_addr4(netif_default)));
   printf("Mask: %s\n", ip4addr_ntoa(netif_ip_netmask4(netif_default)));
   printf("Gateway: %s\n", ip4addr_ntoa(netif_ip_gw4(netif_default)));
+  *ip = ip4addr_ntoa(netif_ip_addr4(netif_default));
 
   return 0;
 }

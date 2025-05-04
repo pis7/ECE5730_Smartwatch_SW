@@ -17,13 +17,14 @@
 #include "i3g4250d.h"
 
 // Include custom images
-#include "dat/battery_img.h"
 #include "dat/mic_img.h"
 #include "dat/heartrate_img.h"
 #include "dat/activity_img.h"
 #include "dat/weather_img.h"
 #include "dat/wifi_img.h"
 #include "dat/no_wifi_img.h"
+#include "dat/message_img.h"
+#include "dat/info_img.h"
 
 // Include WiFi library
 #include "wifi_udp.h"
@@ -31,6 +32,8 @@
 
 // Include microphone library
 #include "pdm_microphone.h"
+
+#define SW_VERSION "1.0.0"
 
 // Some macros for max/min/abs
 #define min(a, b) ((a < b) ? a : b)
@@ -86,7 +89,7 @@ typedef enum
   MM_ACTIVITY,
   MM_VOICE,
   MM_MESSAGE,
-  MM_BATTERY
+  MM_INFO,
 } main_menu_state_t;
 main_menu_state_t main_menu_state = MM_TIME;
 
@@ -133,15 +136,14 @@ void update_menu()
   case DB_MAYBE_PRESSED:
     if (sel_pressed)
     {
-      if (main_menu_state == MM_WEATHER || main_menu_state == MM_ACTIVITY || main_menu_state == MM_MESSAGE)
-      {
+      if (main_menu_state == MM_WEATHER || 
+          main_menu_state == MM_ACTIVITY || 
+          main_menu_state == MM_VOICE ||
+          main_menu_state == MM_MESSAGE ||
+          main_menu_state == MM_INFO) {
         in_sub_menu = 1;
-        SSH1106_Clear();
-      }
-      else if (main_menu_state == MM_VOICE)
-      {
-        in_sub_menu = 1;
-        done_rec = 0;
+        if (main_menu_state == MM_VOICE) done_rec = 0;
+        else SSH1106_Clear();
       }
       select_button_state = DB_PRESSED;
     }
@@ -183,7 +185,7 @@ void update_menu()
         done_rec = 0;
       }
       else
-        main_menu_state = (main_menu_state == MM_BATTERY) ? MM_TIME : (main_menu_state + 1);
+        main_menu_state = (main_menu_state == MM_INFO) ? MM_TIME : (main_menu_state + 1);
       SSH1106_Clear();
       cycle_button_state = DB_PRESSED;
     }
@@ -275,13 +277,8 @@ int main()
   sprintf(time_str, "%02u:%02u:%02u", hours, minutes, seconds);
   sprintf(prev_time_str, "%s", time_str);
 
-  // Other strings
-  char phone_str[20];
-  char weather_str[20];
-  char battery_str[20];
-  char gyro_x_str[20];
-  char gyro_y_str[20];
-  char gyro_z_str[20];
+  // Screen string
+  char screen_str[20];
 
   // Build the sine lookup table
   // scaled to produce values between 0 and 4096 (for 12-bit DAC)
@@ -297,7 +294,10 @@ int main()
   SSH1106_GotoXY(20, 35);
   SSH1106_Puts("   Up   ", &Font_11x18, 1);
   SSH1106_UpdateScreen();
-  int connect_status = wifi_udp_init();
+  char* ip = NULL;
+  char* mac = NULL;
+  int port;
+  int connect_status = wifi_udp_init(&ip, &port, &mac);
   start_wifi_threads();
   SSH1106_Clear();
 
@@ -325,47 +325,6 @@ int main()
 
     update_menu();
 
-    if (ntp_time_initialized)
-    {
-      if (absolute_time_diff_us(last_time_update, get_absolute_time()) >= 1000000)
-      {
-        last_time_update = get_absolute_time();
-
-        seconds++;
-        if (seconds >= 60)
-        {
-          seconds = 0;
-          minutes++;
-        }
-        if (minutes >= 60)
-        {
-          minutes = 0;
-          hours++;
-        }
-        if (hours >= 24)
-        {
-          hours = 0;
-        }
-        sprintf(time_str, "%02u:%02u:%02u", hours, minutes, seconds);
-
-        if (seconds != prev_seconds)
-        {
-          prev_seconds = seconds;
-
-          if (main_menu_state == MM_TIME)
-          {
-            SSH1106_GotoXY(25, 25);
-            SSH1106_Puts(prev_time_str, &Font_11x18, 0);
-            SSH1106_GotoXY(25, 25);
-            SSH1106_Puts(time_str, &Font_11x18, 1);
-
-            SSH1106_UpdateScreen();
-          }
-        }
-        sprintf(prev_time_str, "%s", time_str);
-      }
-    }
-
     switch (main_menu_state)
     {
     case MM_TIME:
@@ -380,16 +339,63 @@ int main()
         prev_seconds = seconds;
         ntp_time_initialized = true;
         last_time_update = get_absolute_time();
+      } else if (ntp_time_initialized) {
+        if (absolute_time_diff_us(last_time_update, get_absolute_time()) >= 1000000) {
+          sprintf(prev_time_str, "%s", time_str);
+          last_time_update = get_absolute_time();
+          seconds++;
+          if (seconds >= 60) {
+            seconds = 0;
+            minutes++;
+          }
+          if (minutes >= 60) {
+            minutes = 0;
+            hours++;
+          }
+          if (hours >= 24){
+            hours = 0;
+          }
+          sprintf(time_str, "%02u:%02u:%02u", hours, minutes, seconds);
+        }
+      } else {
+        sprintf(prev_time_str, "%s", time_str);
+        uptime_ms = time_us_64() / 1000;
+        hours = (uptime_ms / (1000 * 60 * 60)) % 24;
+        minutes = (uptime_ms / (1000 * 60)) % 60;
+        seconds = (uptime_ms / 1000) % 60;
+        sprintf(time_str, "%02u:%02u:%02u", hours, minutes, seconds);
       }
+  
+      if (seconds != prev_seconds) {
+        prev_seconds = seconds;
 
+        if (main_menu_state == MM_TIME)
+        {
+          SSH1106_GotoXY(25, 10);
+          SSH1106_Puts(prev_time_str, &Font_11x18, 0);
+          SSH1106_GotoXY(25, 10);
+          SSH1106_Puts(time_str, &Font_11x18, 1);
+        }
+        if (!connect_status) {
+          for (int i = 0; i < sizeof(wifi_img) / sizeof(wifi_img[0]); i++)
+            SSH1106_DrawPixel(wifi_img[i][0], wifi_img[i][1], 1);
+        } else {
+          for (int i = 0; i < sizeof(no_wifi_img) / sizeof(no_wifi_img[0]); i++)
+            SSH1106_DrawPixel(no_wifi_img[i][0], no_wifi_img[i][1], 1);
+        }
+        sprintf(screen_str, "%02d%%", map_batt(adc_read(), ADC_MIN, ADC_MAX, BATT_MIN, BATT_MAX));
+        SSH1106_GotoXY(80, 40);
+        SSH1106_Puts(screen_str, &Font_11x18, 1);
+        SSH1106_UpdateScreen();
+      }
       break;
     }
     case MM_WEATHER:
       if (in_sub_menu)
       {
-        sprintf(weather_str, "Temp: %dC", read_temp());
+        sprintf(screen_str, "Temp: %dC", read_temp());
         SSH1106_GotoXY(10, 25);
-        SSH1106_Puts(weather_str, &Font_11x18, 1);
+        SSH1106_Puts(screen_str, &Font_11x18, 1);
       }
       else
       {
@@ -409,15 +415,15 @@ int main()
         for (int i = 0; i < 128; i++)
           for (int j = 0; j < 64; j++)
             SSH1106_DrawPixel(i, j, SSH1106_COLOR_BLACK);
-        sprintf(gyro_x_str, "X: %d", read_gyro_x());
-        sprintf(gyro_y_str, "Y: %d", read_gyro_y());
-        sprintf(gyro_z_str, "Z: %d", read_gyro_z());
+        sprintf(screen_str, "X: %d", read_gyro_x());
         SSH1106_GotoXY(10, 6);
-        SSH1106_Puts(gyro_x_str, &Font_11x18, 1);
+        SSH1106_Puts(screen_str, &Font_11x18, 1);
+        sprintf(screen_str, "Y: %d", read_gyro_y());
         SSH1106_GotoXY(10, 25);
-        SSH1106_Puts(gyro_y_str, &Font_11x18, 1);
+        SSH1106_Puts(screen_str, &Font_11x18, 1);
+        sprintf(screen_str, "Z: %d", read_gyro_z());
         SSH1106_GotoXY(10, 44);
-        SSH1106_Puts(gyro_z_str, &Font_11x18, 1);
+        SSH1106_Puts(screen_str, &Font_11x18, 1);
       }
       else
       {
@@ -432,9 +438,9 @@ int main()
         if (!done_rec)
         {
           SSH1106_Clear();
-          sprintf(phone_str, "Recording");
+          sprintf(screen_str, "Recording");
           SSH1106_GotoXY(20, 25);
-          SSH1106_Puts(phone_str, &Font_11x18, 1);
+          SSH1106_Puts(screen_str, &Font_11x18, 1);
           SSH1106_UpdateScreen();
           samp_idx = 0;
           pdm_microphone_start();
@@ -444,9 +450,9 @@ int main()
           }
           pdm_microphone_stop();
           SSH1106_Clear();
-          sprintf(phone_str, "Playback");
+          sprintf(screen_str, "Playback");
           SSH1106_GotoXY(20, 25);
-          SSH1106_Puts(phone_str, &Font_11x18, 1);
+          SSH1106_Puts(screen_str, &Font_11x18, 1);
           SSH1106_UpdateScreen();
           samp_idx = 0;
           samp_idx_inner = 0;
@@ -476,38 +482,60 @@ int main()
       break;
     case MM_MESSAGE:
     {
-      SSH1106_Clear();
-
-      const char *msg = get_latest_udp_message();
-
-      if (strcmp(msg, last_message) != 0)
+      if (in_sub_menu)
       {
-        char filtered_message[BEACON_MSG_LEN_MAX];
-        int j = 0;
-        for (int i = 0; i < BEACON_MSG_LEN_MAX && msg[i] != '\0'; i++)
-        {
-          if (msg[i] >= 32 && msg[i] <= 126)
-          {
-            filtered_message[j++] = msg[i];
+        for (int i = 0; i < 128; i++)
+          for (int j = 0; j < 64; j++)
+            SSH1106_DrawPixel(i, j, SSH1106_COLOR_BLACK);
+        const char *msg = get_latest_udp_message();
+        if (strcmp(msg, last_message) != 0) {
+          char filtered_message[BEACON_MSG_LEN_MAX];
+          int j = 0;
+          int ypos = 10;
+          for (int i = 0; i < BEACON_MSG_LEN_MAX && msg[i] != '\0'; i++) {
+            if (msg[i] >= 32 && msg[i] <= 126) {
+              filtered_message[j++] = msg[i];
+              if (j == 16) {
+                filtered_message[j] = '\0';
+                SSH1106_GotoXY(10, ypos);
+                ypos += 10;
+                SSH1106_Puts(filtered_message, &Font_7x10, 1);
+                j = 0;
+              };
+            }
           }
+          filtered_message[j] = '\0';
+          SSH1106_GotoXY(10, ypos);
+          SSH1106_Puts(filtered_message, &Font_7x10, 1);
+          strncpy(last_message, filtered_message, BEACON_MSG_LEN_MAX);
         }
-        filtered_message[j] = '\0';
-
-        SSH1106_GotoXY(0, 25);
-        SSH1106_Puts(filtered_message, &Font_11x18, 1);
-        SSH1106_UpdateScreen();
-
-        strncpy(last_message, filtered_message, BEACON_MSG_LEN_MAX);
       }
-
+      else
+      {
+        for (int i = 0; i < sizeof(message_img) / sizeof(message_img[0]); i++)
+          SSH1106_DrawPixel(message_img[i][0], message_img[i][1], 1);
+      }
+      SSH1106_UpdateScreen();
       break;
     }
-    case MM_BATTERY:
-      for (int i = 0; i < sizeof(battery_img) / sizeof(battery_img[0]); i++)
-        SSH1106_DrawPixel(battery_img[i][0], battery_img[i][1], 1);
-      sprintf(battery_str, "%02d%%", map_batt(adc_read(), ADC_MIN, ADC_MAX, BATT_MIN, BATT_MAX));
-      SSH1106_GotoXY(50, 40);
-      SSH1106_Puts(battery_str, &Font_11x18, 1);
+    case MM_INFO:
+      if (in_sub_menu)
+      {
+        sprintf(screen_str, "IP: %s", ip);
+        SSH1106_GotoXY(10, 10);
+        SSH1106_Puts(screen_str, &Font_7x10, 1);
+        sprintf(screen_str, "Port: %d, MAC: ", port);
+        SSH1106_GotoXY(10, 25);
+        SSH1106_Puts(screen_str, &Font_7x10, 1);
+        sprintf(screen_str, "%s", mac);
+        SSH1106_GotoXY(10, 40);
+        SSH1106_Puts(screen_str, &Font_7x10, 1);
+      }
+      else
+      {
+        for (int i = 0; i < sizeof(info_img) / sizeof(info_img[0]); i++)
+          SSH1106_DrawPixel(info_img[i][0], info_img[i][1], 1);
+      }
       SSH1106_UpdateScreen();
       break;
     }

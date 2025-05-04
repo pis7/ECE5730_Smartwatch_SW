@@ -301,16 +301,17 @@ static PT_THREAD(protothread_send(struct pt *pt))
 // =======================
 // Public Functions (called by main app)
 
-int wifi_udp_init()
+int wifi_udp_init(char** ip, int* port, char** mac)
 {
-  if (connectWifi(country, WIFI_SSID, WIFI_PASSWORD, auth))
+  *port = UDP_PORT;
+  if (connectWifi(country, WIFI_SSID, WIFI_PASSWORD, auth, ip))
   {
     printf("Failed WiFi connection.\n");
     return 1;
   }
-
   get_MAC_address(mac_address_str);
   printf("Pico W MAC Address: %s\n", mac_address_str);
+  *mac = mac_address_str;
 
   PT_SEM_INIT(&new_message, 0);
 
