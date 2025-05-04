@@ -49,7 +49,7 @@ void update_ntp_time(datetime_t *ntp_time);
 
 // Destination port and IP address
 #define UDP_PORT 1234
-#define BEACON_TARGET "172.20.10.2"
+#define BEACON_TARGET "172.20.10.4"
 
 // Maximum length of our message
 #define BEACON_MSG_LEN_MAX 127
@@ -71,6 +71,10 @@ struct pt_sem new_message;
 // WiFi MAC address storage
 char mac_address_str[18];
 
+const char *get_latest_udp_message()
+{
+  return received_data;
+}
 // =======================
 // Internal Helper Functions
 
@@ -243,10 +247,9 @@ static PT_THREAD(protothread_receive(struct pt *pt))
   {
     PT_SEM_SAFE_WAIT(pt, &new_message);
 
-    // Print received message
-    printf("Received: %s\n", received_data);
+    screen_update_needed = true;
 
-    // You can parse received command here if needed
+    printf("Received: %s\n", received_data);
   }
 
   PT_END(pt);

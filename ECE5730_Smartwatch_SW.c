@@ -75,6 +75,9 @@ int tt_idx = 0;
 extern datetime_t ntp_time;
 static bool ntp_time_initialized = false;
 
+#define BEACON_MSG_LEN_MAX 127
+static char last_message[BEACON_MSG_LEN_MAX] = "";
+
 typedef enum
 {
   MM_TIME,
@@ -82,6 +85,7 @@ typedef enum
   MM_HEART_RATE,
   MM_ACTIVITY,
   MM_VOICE,
+  MM_MESSAGE,
   MM_BATTERY
 } main_menu_state_t;
 main_menu_state_t main_menu_state = MM_TIME;
@@ -129,7 +133,7 @@ void update_menu()
   case DB_MAYBE_PRESSED:
     if (sel_pressed)
     {
-      if (main_menu_state == MM_WEATHER || main_menu_state == MM_ACTIVITY)
+      if (main_menu_state == MM_WEATHER || main_menu_state == MM_ACTIVITY || main_menu_state == MM_MESSAGE)
       {
         in_sub_menu = 1;
         SSH1106_Clear();
@@ -470,6 +474,34 @@ int main()
       }
       SSH1106_UpdateScreen();
       break;
+    case MM_MESSAGE:
+    {
+      SSH1106_Clear();
+
+      const char *msg = get_latest_udp_message();
+
+      if (strcmp(msg, last_message) != 0)
+      {
+        char filtered_message[BEACON_MSG_LEN_MAX];
+        int j = 0;
+        for (int i = 0; i < BEACON_MSG_LEN_MAX && msg[i] != '\0'; i++)
+        {
+          if (msg[i] >= 32 && msg[i] <= 126)
+          {
+            filtered_message[j++] = msg[i];
+          }
+        }
+        filtered_message[j] = '\0';
+
+        SSH1106_GotoXY(0, 25);
+        SSH1106_Puts(filtered_message, &Font_11x18, 1);
+        SSH1106_UpdateScreen();
+
+        strncpy(last_message, filtered_message, BEACON_MSG_LEN_MAX);
+      }
+
+      break;
+    }
     case MM_BATTERY:
       for (int i = 0; i < sizeof(battery_img) / sizeof(battery_img[0]); i++)
         SSH1106_DrawPixel(battery_img[i][0], battery_img[i][1], 1);

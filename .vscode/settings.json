@@ -39,6 +39,7 @@
     "files.associations": {
         "*.va": "verilog",
         "no-wifi_img.h": "c",
-        "rtc.h": "c"
+        "rtc.h": "c",
+        "system_error": "c"
     }
 }

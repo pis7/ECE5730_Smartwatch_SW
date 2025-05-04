@@ -2,6 +2,9 @@
 #define WIFI_UDP_H
 
 extern bool ntp_time_ready;
+extern volatile bool screen_update_needed;
+
+const char *get_latest_udp_message();
 
 int wifi_udp_init();
 void start_wifi_threads();
