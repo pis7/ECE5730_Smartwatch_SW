@@ -1,46 +1,48 @@
 #include "heart_sensor_bpm.h"
 
 void MAX3010x_Init() {
-    // Reset the sensor
-    uint8_t data[2] = {REG_MODE_CONFIG, MODE_RESET};
-    i2c_write_blocking(I2C_CHAN, MAX30105_I2C_ADDR, data, 2, false);
+    uint8_t fifo_cfg[2] = {0x08, 0x90}; // 4 sample average, enable FIFO rollover;
+    i2c_write_blocking(I2C_CHAN, MAX30105_I2C_ADDR, fifo_cfg, 2, false);
 
-    // Enable interrupts
-    data[0] = REG_INTERRUPT_ENABLE_1;
-    data[1] = 0xC0;  // A_FULL + PPG Ready
-    i2c_write_blocking(I2C_CHAN, MAX30105_I2C_ADDR, data, 2, false);  // A_FULL + PPG Ready
+    uint8_t led_mode[2] = {0x09, 0x02}; // Red only
+    i2c_write_blocking(I2C_CHAN, MAX30105_I2C_ADDR, led_mode, 2, false); // Red only
 
-    // Clear FIFO
-    data[0] = REG_FIFO_WR_PTR;
-    data[1] = 0x00;
-    i2c_write_blocking(I2C_CHAN, MAX30105_I2C_ADDR, data, 2, false);
-    data[0] = REG_FIFO_RD_PTR;
-    data[1] = 0x00;
-    i2c_write_blocking(I2C_CHAN, MAX30105_I2C_ADDR, data, 2, false);
-    data[0] = REG_FIFO_OVERFLOW_COUNTER;
-    data[1] = 0x00;
-    i2c_write_blocking(I2C_CHAN, MAX30105_I2C_ADDR, data, 2, false);
+    uint8_t spo2_cfg[2] = {0x0A, 0x00}; // 2048 ADC rangve, 50Hz sample rate, 69us pulse width
+    i2c_write_blocking(I2C_CHAN, MAX30105_I2C_ADDR, spo2_cfg, 2, false); // 2048 ADC range, 50Hz sample rate, 69us pulse width
 
-    data[0] = REG_SPO2_CONFIG;
-    data[1] = SPO2_SR_100 | SPO2_ADC_RANGE_4096 | SPO2_PW_411;
-    i2c_write_blocking(I2C_CHAN, MAX30105_I2C_ADDR, data, 2, false);
+    uint8_t red_pa[2] = {0x0C, 0x0A};
+    i2c_write_blocking(I2C_CHAN, MAX30105_I2C_ADDR, red_pa, 2, false); // Set Red LED to 10mA
 
-    // Set LED pulse amplitudes
-    data[0] = REG_RED;
-    data[1] = 0x24;  // Set to 24mA (0x24)
-    i2c_write_blocking(I2C_CHAN, MAX30105_I2C_ADDR, data, 1, false);
-    data[0] = REG_IR;
-    data[1] = 0x24;  // Set to 24mA (0x24)
-    i2c_write_blocking(I2C_CHAN, MAX30105_I2C_ADDR, data, 1, false);
+    uint8_t ir_pa[2] = {0x0D, 0x00};
+    i2c_write_blocking(I2C_CHAN, MAX30105_I2C_ADDR, ir_pa, 2, false); // Set IR LED to 10mA
+    
+    uint8_t multi_led[2] = {0x11, 0x01}; // Set to 1 LED mode (Red only)
+    i2c_write_blocking(I2C_CHAN, MAX30105_I2C_ADDR, multi_led, 2, false); // Set to 1 LED mode (Red only)
 
-    // Set mode to SpO2 (uses Red + IR)
-    data[0] = REG_MODE_CONFIG;
-    data[1] = MODE_SPO2;  // Set to SpO2 mode
-    i2c_write_blocking(I2C_CHAN, MAX30105_I2C_ADDR, data, 1, false);
+    uint8_t clr_wrt_ptr[2] = {0x04, 0x00};
+    i2c_write_blocking(I2C_CHAN, MAX30105_I2C_ADDR, clr_wrt_ptr, 2, false); // Clear the FIFO write pointer
+
+    uint8_t clr_overflow[2] = {0x05, 0x00};
+    i2c_write_blocking(I2C_CHAN, MAX30105_I2C_ADDR, clr_overflow, 2, false); // Clear the FIFO overflow counter
+
+    uint8_t clr_rd_ptr[2] = {0x06, 0x00};
+    i2c_write_blocking(I2C_CHAN, MAX30105_I2C_ADDR, clr_rd_ptr, 2, false); // Clear the FIFO read pointer
+}
+
+
+
+int MAX3010x_ReadTemp() {
+  // uint8_t cfg_data[2] = {0x21, 0x01};
+  // i2c_write_blocking(I2C_CHAN, MAX30105_I2C_ADDR, cfg_data, 2, false); // Set to 1Hz
+  uint8_t reg = 0x07;  
+  uint8_t data;
+  i2c_write_blocking(I2C_CHAN, MAX30105_I2C_ADDR, &reg, 1, true);
+  i2c_read_blocking(I2C_CHAN, MAX30105_I2C_ADDR, &data, 1, false);
+  return data;
 }
 
 void MAX3010x_ReadFIFO(uint32_t *red, uint32_t *irValue) {
-    uint8_t reg = REG_FIFO_DATA;
+    uint8_t reg = 0x07;
     uint8_t data[6];
     i2c_write_blocking(I2C_CHAN, MAX30105_I2C_ADDR, &reg, 1, true);
     i2c_read_blocking(I2C_CHAN, MAX30105_I2C_ADDR, data, 6, false);

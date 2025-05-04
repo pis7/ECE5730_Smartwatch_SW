@@ -2,9 +2,11 @@
 #define HEART_SENSOR_BPM_H
 
 #include "common.h"
-#include "MAX30105_registers.h"
+
+#define MAX30105_I2C_ADDR 0x57
 
 void MAX3010x_Init();
+int MAX3010x_ReadTemp();
 void MAX3010x_ReadFIFO(uint32_t *red, uint32_t *irValue);
 bool checkForBeat(int32_t sample, int16_t IR_AC_Max, int16_t IR_AC_Min, 
     int16_t IR_AC_Signal_Current, int16_t* IR_AC_Signal_Previous,

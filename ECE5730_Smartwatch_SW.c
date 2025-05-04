@@ -27,7 +27,6 @@
 #include "wifi_udp.h"
 
 // Heart rate library
-#include "MAX30105_registers.h"
 #include "heart_sensor_bpm.h" 
 
 // Some macros for max/min/abs
@@ -320,8 +319,8 @@ int main()
   timer_hw->alarm[ALARM_NUM] = timer_hw->timerawl + DELAY;
 
   // Initialize the UDP server
-  wifi_udp_init();
-  start_wifi_threads();
+  // wifi_udp_init();
+  // start_wifi_threads();
 
   while (true)
   {
@@ -377,34 +376,38 @@ int main()
     case MM_HEART_RATE:
       if (in_sub_menu)
       {
-        uint32_t red, irValue;
-        MAX3010x_ReadFIFO(&red, &irValue);
 
-        if (checkForBeat(irValue, IR_AC_Max, IR_AC_Min,
-                         IR_AC_Signal_Current, &IR_AC_Signal_Previous,
-                         IR_AC_Signal_min, IR_AC_Signal_max, IR_Average_Estimated,
-                         positiveEdge, negativeEdge, ir_avg_reg,
-                         cbuf, offset, FIRCoeffs)) {
-            uint32_t now = to_ms_since_boot(get_absolute_time());
-            uint32_t delta = now - lastBeat;
-            lastBeat = now;
+        SSH1106_GotoXY(10, 25);
+        sprintf(hr_str, "BPM: %d", MAX3010x_ReadTemp());
+        SSH1106_Puts(hr_str, &Font_11x18, 1);
+        // uint32_t red, irValue;
+        // MAX3010x_ReadFIFO(&red, &irValue);
 
-            float beatsPerMinute = 60000.0f / delta;
-            rates[rateSpot++] = beatsPerMinute;
-            if (rateSpot >= RATE_SIZE) rateSpot = 0;
+        // if (checkForBeat(irValue, IR_AC_Max, IR_AC_Min,
+        //                  IR_AC_Signal_Current, &IR_AC_Signal_Previous,
+        //                  IR_AC_Signal_min, IR_AC_Signal_max, IR_Average_Estimated,
+        //                  positiveEdge, negativeEdge, ir_avg_reg,
+        //                  cbuf, offset, FIRCoeffs)) {
+        //     uint32_t now = to_ms_since_boot(get_absolute_time());
+        //     uint32_t delta = now - lastBeat;
+        //     lastBeat = now;
 
-            float beatAvg = 0;
-            for (int i = 0; i < RATE_SIZE; i++) 
-                beatAvg += rates[i];
-            beatAvg /= RATE_SIZE;
+        //     float beatsPerMinute = 60000.0f / delta;
+        //     rates[rateSpot++] = beatsPerMinute;
+        //     if (rateSpot >= RATE_SIZE) rateSpot = 0;
 
-            SSH1106_GotoXY(10, 25);
-            sprintf(hr_str, "BPM: %.2f", beatAvg);
-            SSH1106_Puts(hr_str, &Font_11x18, 1);
+        //     float beatAvg = 0;
+        //     for (int i = 0; i < RATE_SIZE; i++) 
+        //         beatAvg += rates[i];
+        //     beatAvg /= RATE_SIZE;
 
-            // printf("Beat detected! IR = %lu, BPM = %.2f\n", irValue, beatAvg);
-        }
-        sleep_ms(10);
+        //     SSH1106_GotoXY(10, 25);
+        //     sprintf(hr_str, "BPM: %.2f", beatAvg);
+        //     SSH1106_Puts(hr_str, &Font_11x18, 1);
+
+        //     // printf("Beat detected! IR = %lu, BPM = %.2f\n", irValue, beatAvg);
+        // }
+        // sleep_ms(10);
       } else {
         for (int i = 0; i < sizeof(heartrate_img) / sizeof(heartrate_img[0]); i++)
           SSH1106_DrawPixel(heartrate_img[i][0], heartrate_img[i][1], 1);
