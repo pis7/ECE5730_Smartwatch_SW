@@ -19,5 +19,7 @@ int read_temp();
 int read_gyro_x();
 int read_gyro_y();
 int read_gyro_z();
+float get_z_rateDPS();
+void update_step(float* prev_z, int* step_count);
 
 #endif

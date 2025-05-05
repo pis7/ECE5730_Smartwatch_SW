@@ -145,6 +145,10 @@ int16_t cbuf[32];
 uint8_t offset = 0;
 static const uint16_t FIRCoeffs[12] = {172, 321, 579, 927, 1360, 1858, 2390, 2916, 3391, 3768, 4012, 4096};
 
+// Step tracking
+float prev_z;
+int step_count;
+
 void update_menu()
 {
   int sel_pressed = gpio_get(SELECT_BUTTON);
@@ -353,7 +357,7 @@ int main()
   {
 
     update_menu();
-
+    update_step(&prev_z, &step_count);
     switch (main_menu_state)
     {
     case MM_TIME:
@@ -476,14 +480,8 @@ int main()
         for (int i = 0; i < 128; i++)
           for (int j = 0; j < 64; j++)
             SSH1106_DrawPixel(i, j, SSH1106_COLOR_BLACK);
-        sprintf(screen_str, "X: %d", read_gyro_x());
-        SSH1106_GotoXY(10, 6);
-        SSH1106_Puts(screen_str, &Font_11x18, 1);
-        sprintf(screen_str, "Y: %d", read_gyro_y());
+        sprintf(screen_str, "Steps: %d", step_count);
         SSH1106_GotoXY(10, 25);
-        SSH1106_Puts(screen_str, &Font_11x18, 1);
-        sprintf(screen_str, "Z: %d", read_gyro_z());
-        SSH1106_GotoXY(10, 44);
         SSH1106_Puts(screen_str, &Font_11x18, 1);
       }
       else

@@ -39,3 +39,15 @@ int read_gyro_z() {
   int16_t tmp_data = (data[1] << 8) | data[0];
   return (int)(tmp_data * RATE_CONV);
 }
+
+float get_z_rateDPS() {
+    int16_t raw_z = read_gyro_z();
+    return raw_z * 0.00875f;  // For 250 dps: 8.75 mdps/LSB
+}
+
+void update_step(float* prev_z, int* step_count) {
+    float z = get_z_rateDPS();
+    if (z > 1.2 && *prev_z <= 1.2)
+      (*step_count)++;  
+    *prev_z = z;
+}
