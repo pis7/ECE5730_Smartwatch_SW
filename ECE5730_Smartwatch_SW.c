@@ -33,7 +33,8 @@
 // Include microphone library
 #include "pdm_microphone.h"
 
-#define SW_VERSION "1.0.0"
+// Heart rate library
+#include "heart_sensor_bpm.h" 
 
 // Some macros for max/min/abs
 #define min(a, b) ((a < b) ? a : b)
@@ -122,6 +123,28 @@ volatile int samp_idx_inner = 0;
 
 int done_rec = 0;
 
+// Heart rate variables
+sense_struct sense;
+#define RATE_SIZE 4 //Increase this for more averaging. 4 is good.
+uint8_t rates[RATE_SIZE]; //Array of heart rates
+uint8_t rateSpot = 0;
+long lastBeat = 0; //Time at which the last beat occurred
+float beatsPerMinute;
+int beatAvg;
+int16_t IR_AC_Max = 20;
+int16_t IR_AC_Min = -20;
+int16_t IR_AC_Signal_Current = 0;
+int16_t IR_AC_Signal_Previous;
+int16_t IR_AC_Signal_min = 0;
+int16_t IR_AC_Signal_max = 0;
+int16_t IR_Average_Estimated;
+int16_t positiveEdge = 0;
+int16_t negativeEdge = 0;
+int32_t ir_avg_reg = 0;
+int16_t cbuf[32];
+uint8_t offset = 0;
+static const uint16_t FIRCoeffs[12] = {172, 321, 579, 927, 1360, 1858, 2390, 2916, 3391, 3768, 4012, 4096};
+
 void update_menu()
 {
   int sel_pressed = gpio_get(SELECT_BUTTON);
@@ -140,10 +163,12 @@ void update_menu()
           main_menu_state == MM_ACTIVITY || 
           main_menu_state == MM_VOICE ||
           main_menu_state == MM_MESSAGE ||
-          main_menu_state == MM_INFO) {
+          main_menu_state == MM_INFO ||
+          main_menu_state == MM_HEART_RATE) {
         in_sub_menu = 1;
         if (main_menu_state == MM_VOICE) done_rec = 0;
         else SSH1106_Clear();
+        if (main_menu_state == MM_HEART_RATE) hr_on();
       }
       select_button_state = DB_PRESSED;
     }
@@ -182,6 +207,7 @@ void update_menu()
       if (in_sub_menu)
       {
         in_sub_menu = 0;
+        if (main_menu_state == MM_HEART_RATE) hr_off();
         done_rec = 0;
       }
       else
@@ -264,9 +290,12 @@ int main()
   pdm_microphone_init(&mic_config);
   pdm_microphone_set_samples_ready_handler(on_pdm_samples_ready);
 
-  absolute_time_t last_time_update = get_absolute_time();
+  // Heart rate sensor initialization
+  MAX3010x_Init();
+  hr_off();
 
   // Time variables
+  absolute_time_t last_time_update = get_absolute_time();
   uint64_t uptime_ms = 0;
   uint32_t hours = 0;
   uint32_t minutes = 0;
@@ -405,8 +434,40 @@ int main()
       SSH1106_UpdateScreen();
       break;
     case MM_HEART_RATE:
-      for (int i = 0; i < sizeof(heartrate_img) / sizeof(heartrate_img[0]); i++)
-        SSH1106_DrawPixel(heartrate_img[i][0], heartrate_img[i][1], 1);
+      if (in_sub_menu)
+      {
+        long irValue = getIR(&sense);
+
+        if (checkForBeat(irValue, &IR_AC_Max, &IR_AC_Min,
+          &IR_AC_Signal_Current, &IR_AC_Signal_Previous,
+          &IR_AC_Signal_min, &IR_AC_Signal_max, &IR_Average_Estimated,
+          &positiveEdge, &negativeEdge, &ir_avg_reg,
+          cbuf, &offset, FIRCoeffs)) {
+
+          long delta = to_ms_since_boot(get_absolute_time()) - lastBeat;
+          lastBeat = to_ms_since_boot(get_absolute_time());
+      
+          beatsPerMinute = 60 / (delta / 1000.0);
+      
+          if (beatsPerMinute < 255 && beatsPerMinute > 20)
+          {
+            rates[rateSpot++] = (uint8_t)beatsPerMinute; //Store this reading in the array
+            rateSpot %= RATE_SIZE; //Wrap variable
+      
+            //Take average of readings
+            beatAvg = 0;
+            for (uint8_t x = 0 ; x < RATE_SIZE ; x++)
+              beatAvg += rates[x];
+            beatAvg /= RATE_SIZE;
+          }
+        }
+        sprintf(screen_str, "BPM: %d", beatAvg);
+        SSH1106_GotoXY(15, 25);
+        SSH1106_Puts(screen_str, &Font_11x18, 1);
+      } else {
+        for (int i = 0; i < sizeof(heartrate_img) / sizeof(heartrate_img[0]); i++)
+          SSH1106_DrawPixel(heartrate_img[i][0], heartrate_img[i][1], 1);
+      }
       SSH1106_UpdateScreen();
       break;
     case MM_ACTIVITY:
