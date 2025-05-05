@@ -56,7 +56,6 @@ target_sources(ECE5730_Smartwatch_SW PRIVATE
     i3g4250d.c
     wifi_udp.c
     heart_sensor_bpm.c
-    
     OpenPDMFilter.c
     pdm_microphone.c
     )

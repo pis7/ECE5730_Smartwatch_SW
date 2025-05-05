@@ -15,7 +15,7 @@
 #define RATE_CONV 490.0/65536.0
 
 void init_i3g4250();
-uint8_t read_temp();
+int read_temp();
 int read_gyro_x();
 int read_gyro_y();
 int read_gyro_z();

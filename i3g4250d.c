@@ -5,12 +5,12 @@ void init_i3g4250() {
   i2c_write_blocking(I2C_CHAN, I3G4250D_ADDR, data, 2, false);
 }
 
-uint8_t read_temp() {
+int read_temp() {
   uint8_t temp_reg = I3G4250D_TEMP_REG | 0x80;
   uint8_t data;
   i2c_write_blocking(I2C_CHAN, I3G4250D_ADDR, &temp_reg, 1, true);
   i2c_read_blocking(I2C_CHAN, I3G4250D_ADDR, &data, 1, false);
-  return data;
+  return (data * -1) + 25; // Convert to Celsius
 }
 
 int read_gyro_x() {
