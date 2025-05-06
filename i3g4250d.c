@@ -41,13 +41,25 @@ int read_gyro_z() {
 }
 
 float get_z_rateDPS() {
-    int16_t raw_z = read_gyro_z();
-    return raw_z * 0.00875f;  // For 250 dps: 8.75 mdps/LSB
+  int16_t raw_z = read_gyro_z();
+  return raw_z * 0.00875f;  // For 250 dps: 8.75 mdps/LSB
+}
+
+float get_x_rateDPS() {
+  int16_t raw_y = read_gyro_x();
+  return raw_y * 0.00875f;  // For 250 dps: 8.75 mdps/LSB
 }
 
 void update_step(float* prev_z, int* step_count) {
-    float z = get_z_rateDPS();
-    if (z > 1.2 && *prev_z <= 1.2)
-      (*step_count)++;  
-    *prev_z = z;
+  float z = get_z_rateDPS();
+  if (z > 1.2 && *prev_z <= 1.2)
+    (*step_count)++;  
+  *prev_z = z;
+}
+
+int check_screen() {
+  float x = get_x_rateDPS();
+  if (x > 2.0) return 1;
+  if (x < -2.0) return -1;
+  return 0; 
 }

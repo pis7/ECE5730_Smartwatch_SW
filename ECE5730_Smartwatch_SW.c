@@ -34,7 +34,7 @@
 #include "pdm_microphone.h"
 
 // Heart rate library
-#include "heart_sensor_bpm.h" 
+#include "heart_sensor_bpm.h"
 
 // Some macros for max/min/abs
 #define min(a, b) ((a < b) ? a : b)
@@ -81,11 +81,16 @@ static bool ntp_time_initialized = false;
 
 #define BEACON_MSG_LEN_MAX 127
 static char last_message[BEACON_MSG_LEN_MAX] = "";
+char filtered_message[BEACON_MSG_LEN_MAX] = "\0";
+
+char* ip = NULL;
+char* mac = NULL;
+int port;
+int connect_status;
 
 typedef enum
 {
   MM_TIME,
-  MM_WEATHER,
   MM_HEART_RATE,
   MM_ACTIVITY,
   MM_VOICE,
@@ -163,8 +168,7 @@ void update_menu()
   case DB_MAYBE_PRESSED:
     if (sel_pressed)
     {
-      if (main_menu_state == MM_WEATHER || 
-          main_menu_state == MM_ACTIVITY || 
+      if (main_menu_state == MM_ACTIVITY || 
           main_menu_state == MM_VOICE ||
           main_menu_state == MM_MESSAGE ||
           main_menu_state == MM_INFO ||
@@ -251,55 +255,8 @@ void on_pdm_samples_ready()
 {
   pdm_microphone_read(mic_samp_buff[samp_idx++], SAMPLE_BUFFER_SIZE);
 }
-int main()
-{
 
-  // POR delay
-  sleep_ms(10);
-
-  // Initialize standard I/O
-  stdio_init_all();
-
-  // Initialize I2C
-  i2c_init(I2C_CHAN, I2C_BAUD_RATE);
-  gpio_set_function(SDA_PIN, GPIO_FUNC_I2C);
-  gpio_set_function(SCL_PIN, GPIO_FUNC_I2C);
-
-  // Initialize SPI
-  spi_init(SPI_PORT, 20000000); // 20MHz
-  spi_set_format(SPI_PORT, 16, 0, 0, 0);
-  gpio_set_function(PIN_MISO, GPIO_FUNC_SPI);
-  gpio_set_function(PIN_SCK, GPIO_FUNC_SPI);
-  gpio_set_function(PIN_MOSI, GPIO_FUNC_SPI);
-  gpio_set_function(PIN_CS, GPIO_FUNC_SPI);
-
-  // Initialize GPIO
-  gpio_init(CYCLE_BUTTON);
-  gpio_set_dir(CYCLE_BUTTON, GPIO_IN);
-  gpio_pull_down(CYCLE_BUTTON);
-
-  gpio_init(SELECT_BUTTON);
-  gpio_set_dir(SELECT_BUTTON, GPIO_IN);
-  gpio_pull_down(SELECT_BUTTON);
-
-  // Initialize ADC
-  adc_gpio_init(ADC_PIN);
-  adc_init();
-  adc_select_input(ADC_CHAN);
-
-  // Initialize OLED display
-  SSH1106_Init();
-
-  // Initialize I3G4250D
-  init_i3g4250();
-
-  // Initialize microphone
-  pdm_microphone_init(&mic_config);
-  pdm_microphone_set_samples_ready_handler(on_pdm_samples_ready);
-
-  // Heart rate sensor initialization
-  MAX3010x_Init();
-  hr_off();
+void core1_entry() {
 
   // Time variables
   absolute_time_t last_time_update = get_absolute_time();
@@ -323,44 +280,18 @@ int main()
   {
     sin_table[ii] = 2047.0 * sin((float)ii * 6.283 / (float)sine_table_size);
   }
-
-  // Connect to WiFi
-  SSH1106_GotoXY(20, 15);
-  SSH1106_Puts("Powering", &Font_11x18, 1);
-  SSH1106_GotoXY(20, 35);
-  SSH1106_Puts("   Up   ", &Font_11x18, 1);
-  SSH1106_UpdateScreen();
-  char* ip = NULL;
-  char* mac = NULL;
-  int port;
-  int connect_status = wifi_udp_init(&ip, &port, &mac);
-  start_wifi_threads();
-  SSH1106_Clear();
-
-  if (!connect_status)
-  {
-    SSH1106_GotoXY(20, 15);
-    SSH1106_Puts(" Connect ", &Font_11x18, 1);
-    SSH1106_GotoXY(20, 35);
-    SSH1106_Puts(" Success ", &Font_11x18, 1);
-    SSH1106_UpdateScreen();
-  }
-  else
-  {
-    SSH1106_GotoXY(20, 15);
-    SSH1106_Puts(" Connect ", &Font_11x18, 1);
-    SSH1106_GotoXY(20, 35);
-    SSH1106_Puts("   Fail  ", &Font_11x18, 1);
-    SSH1106_UpdateScreen();
-  }
-  sleep_ms(2000);
-  SSH1106_Clear();
+  
+  int screen_rd = 0;
+  int screen_status = 1;
 
   while (true)
   {
-
     update_menu();
     update_step(&prev_z, &step_count);
+    screen_rd = check_screen();
+    if (screen_rd == 1) screen_status = 1;
+    if (screen_rd == -1) screen_status = 0;
+    if (screen_status) {
     switch (main_menu_state)
     {
     case MM_TIME:
@@ -426,20 +357,6 @@ int main()
       }
       break;
     }
-    case MM_WEATHER:
-      if (in_sub_menu)
-      {
-        sprintf(screen_str, "Temp: %dC", read_temp());
-        SSH1106_GotoXY(10, 25);
-        SSH1106_Puts(screen_str, &Font_11x18, 1);
-      }
-      else
-      {
-        for (int i = 0; i < sizeof(weather_img) / sizeof(weather_img[0]); i++)
-          SSH1106_DrawPixel(weather_img[i][0], weather_img[i][1], 1);
-      }
-      SSH1106_UpdateScreen();
-      break;
     case MM_HEART_RATE:
       if (in_sub_menu)
       {
@@ -528,7 +445,7 @@ int main()
               samp_idx_inner = 0;
               samp_idx++;
             }
-            sleep_us(DELAY);
+            busy_wait_us(DELAY);
           }
           samp_idx = 0;
           samp_idx_inner = 0;
@@ -546,30 +463,37 @@ int main()
     {
       if (in_sub_menu)
       {
+        int ypos = 10;
         for (int i = 0; i < 128; i++)
           for (int j = 0; j < 64; j++)
             SSH1106_DrawPixel(i, j, SSH1106_COLOR_BLACK);
-        const char *msg = get_latest_udp_message();
-        if (strcmp(msg, last_message) != 0) {
-          char filtered_message[BEACON_MSG_LEN_MAX];
-          int j = 0;
-          int ypos = 10;
-          for (int i = 0; i < BEACON_MSG_LEN_MAX && msg[i] != '\0'; i++) {
-            if (msg[i] >= 32 && msg[i] <= 126) {
-              filtered_message[j++] = msg[i];
-              if (j == 16) {
-                filtered_message[j] = '\0';
-                SSH1106_GotoXY(10, ypos);
-                ypos += 10;
-                SSH1106_Puts(filtered_message, &Font_7x10, 1);
-                j = 0;
-              };
-            }
+        char line_buffer[17]; // Buffer to hold each line (16 chars + null terminator)
+        int line_start = 0;
+        int line_end = 0;
+
+        while (filtered_message[line_end] != '\0') {
+          // Look for the next newline or end of string
+          while (filtered_message[line_end] != '\n' && filtered_message[line_end] != '\0') {
+            line_end++;
           }
-          filtered_message[j] = '\0';
+
+          // Copy the line into the buffer
+          int line_length = line_end - line_start;
+          strncpy(line_buffer, &filtered_message[line_start], line_length);
+          line_buffer[line_length] = '\0'; // Null-terminate the line
+
+          // Display the line on the screen
           SSH1106_GotoXY(10, ypos);
-          SSH1106_Puts(filtered_message, &Font_7x10, 1);
-          strncpy(last_message, filtered_message, BEACON_MSG_LEN_MAX);
+          SSH1106_Puts(line_buffer, &Font_7x10, 1);
+          ypos += 10; // Move to the next line position
+
+          // If we hit a newline, skip it
+          if (filtered_message[line_end] == '\n') {
+            line_end++;
+          }
+
+          // Update the start position for the next line
+          line_start = line_end;
         }
       }
       else
@@ -600,6 +524,115 @@ int main()
       }
       SSH1106_UpdateScreen();
       break;
+    }
+  } else {
+    for (int i = 0; i < 128; i++)
+      for (int j = 0; j < 64; j++)
+        SSH1106_DrawPixel(i, j, SSH1106_COLOR_BLACK);
+    SSH1106_UpdateScreen(); 
+  }
+  }
+
+}
+
+int main()
+{
+
+  // POR delay
+  sleep_ms(10);
+
+  // Initialize standard I/O
+  stdio_init_all();
+
+  // Initialize I2C
+  i2c_init(I2C_CHAN, I2C_BAUD_RATE);
+  gpio_set_function(SDA_PIN, GPIO_FUNC_I2C);
+  gpio_set_function(SCL_PIN, GPIO_FUNC_I2C);
+
+  // Initialize SPI
+  // bitwise_spi0_init();
+  spi_init(SPI_PORT, 20000000); // 20MHz
+  spi_set_format(SPI_PORT, 16, 0, 0, 0);
+  gpio_set_function(PIN_MISO, GPIO_FUNC_SPI);
+  gpio_set_function(PIN_SCK, GPIO_FUNC_SPI);
+  gpio_set_function(PIN_MOSI, GPIO_FUNC_SPI);
+  gpio_set_function(PIN_CS, GPIO_FUNC_SPI);
+
+  // Initialize GPIO
+  gpio_init(CYCLE_BUTTON);
+  gpio_set_dir(CYCLE_BUTTON, GPIO_IN);
+  gpio_pull_down(CYCLE_BUTTON);
+
+  gpio_init(SELECT_BUTTON);
+  gpio_set_dir(SELECT_BUTTON, GPIO_IN);
+  gpio_pull_down(SELECT_BUTTON);
+
+  // Initialize ADC
+  adc_gpio_init(ADC_PIN);
+  adc_init();
+  adc_select_input(ADC_CHAN);
+
+  // Initialize OLED display
+  SSH1106_Init();
+
+  // Initialize I3G4250D
+  init_i3g4250();
+
+  // Initialize microphone
+  pdm_microphone_init(&mic_config);
+  pdm_microphone_set_samples_ready_handler(on_pdm_samples_ready);
+
+  // Heart rate sensor initialization
+  MAX3010x_Init();
+  hr_off();
+
+  // Connect to WiFi
+  SSH1106_GotoXY(20, 15);
+  SSH1106_Puts("Powering", &Font_11x18, 1);
+  SSH1106_GotoXY(20, 35);
+  SSH1106_Puts("   Up   ", &Font_11x18, 1);
+  SSH1106_UpdateScreen();
+  connect_status = wifi_udp_init(&ip, &port, &mac);
+  start_wifi_threads();
+  SSH1106_Clear();
+
+  if (!connect_status)
+  {
+    SSH1106_GotoXY(20, 15);
+    SSH1106_Puts(" Connect ", &Font_11x18, 1);
+    SSH1106_GotoXY(20, 35);
+    SSH1106_Puts(" Success ", &Font_11x18, 1);
+    SSH1106_UpdateScreen();
+  }
+  else
+  {
+    SSH1106_GotoXY(20, 15);
+    SSH1106_Puts(" Connect ", &Font_11x18, 1);
+    SSH1106_GotoXY(20, 35);
+    SSH1106_Puts("   Fail  ", &Font_11x18, 1);
+    SSH1106_UpdateScreen();
+  }
+  sleep_ms(2000);
+  SSH1106_Clear();
+
+  multicore_reset_core1();
+  multicore_launch_core1(core1_entry);
+
+  while(1) {
+    const char *msg = get_latest_udp_message();
+    if (strcmp(msg, last_message) != 0) {
+      int j = 0;
+      int ypos = 10;
+      for (int i = 0; i < BEACON_MSG_LEN_MAX && msg[i] != '\0' && msg[i] != '\r' && msg[i] != '\n'; i++) {
+        if (msg[i] >= 32 && msg[i] <= 126) {
+          filtered_message[j++] = msg[i];
+          if (j % 16 == 0) {
+            filtered_message[j++] = '\n';
+          }
+        }
+      }
+      filtered_message[j] = '\0';
+      strncpy(last_message, filtered_message, BEACON_MSG_LEN_MAX);
     }
   }
 }
