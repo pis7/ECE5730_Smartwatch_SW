@@ -12,6 +12,9 @@
 #define WIFI_SSID "CTT-WIFI"
 #define WIFI_PASSWORD "5FBUMP4E"
 
+// #define WIFI_SSID "Parker’s iPhone"
+// #define WIFI_PASSWORD "Temp123!"
+
 uint32_t country = CYW43_COUNTRY_USA;
 uint32_t auth = CYW43_AUTH_WPA2_MIXED_PSK;
 
@@ -35,8 +38,8 @@ int connectWifi(uint32_t country, const char *ssid, const char *pass, uint32_t a
   // Print a status message
   printf("Attempting connection . . . \n");
 
-  // Connect to the network
-  if (cyw43_arch_wifi_connect_blocking(ssid, pass, auth))
+  // Connect to the network (timeout after 5 seconds)
+  if (cyw43_arch_wifi_connect_timeout_ms(ssid, pass, auth, 10000))
   {
     return 2;
   }

@@ -254,6 +254,9 @@ void on_pdm_samples_ready()
 int main()
 {
 
+  // POR delay
+  sleep_ms(10);
+
   // Initialize standard I/O
   stdio_init_all();
 
