@@ -264,9 +264,12 @@ void core1_entry() {
   uint32_t hours = 0;
   uint32_t minutes = 0;
   uint32_t seconds = 0;
+  uint32_t month = 0;
+  uint32_t day = 0;
   uint32_t prev_seconds = -1;
   char prev_time_str[20];
   char time_str[20];
+  char date_str[20];
   sprintf(time_str, "%02u:%02u:%02u", hours, minutes, seconds);
   sprintf(prev_time_str, "%s", time_str);
 
@@ -303,6 +306,8 @@ void core1_entry() {
         hours = now.hour;
         minutes = now.min;
         seconds = now.sec;
+        month = now.month;
+        day = now.day;
         prev_seconds = seconds;
         ntp_time_initialized = true;
         last_time_update = get_absolute_time();
@@ -324,6 +329,7 @@ void core1_entry() {
           }
           sprintf(time_str, "%02u:%02u:%02u", hours, minutes, seconds);
         }
+        sprintf(date_str, "%02u/%02u", month, day);
       } else {
         sprintf(prev_time_str, "%s", time_str);
         uptime_ms = time_us_64() / 1000;
@@ -336,13 +342,14 @@ void core1_entry() {
       if (seconds != prev_seconds) {
         prev_seconds = seconds;
 
-        if (main_menu_state == MM_TIME)
-        {
-          SSH1106_GotoXY(25, 10);
-          SSH1106_Puts(prev_time_str, &Font_11x18, 0);
-          SSH1106_GotoXY(25, 10);
-          SSH1106_Puts(time_str, &Font_11x18, 1);
-        }
+        SSH1106_GotoXY(25, 10);
+        SSH1106_Puts(prev_time_str, &Font_11x18, 0);
+        SSH1106_GotoXY(25, 10);
+        SSH1106_Puts(time_str, &Font_11x18, 1);
+
+        SSH1106_GotoXY(47, 42);
+        SSH1106_Puts(date_str, &Font_7x10, 1);
+
         if (!connect_status) {
           for (int i = 0; i < sizeof(wifi_img) / sizeof(wifi_img[0]); i++)
             SSH1106_DrawPixel(wifi_img[i][0], wifi_img[i][1], 1);
@@ -351,7 +358,7 @@ void core1_entry() {
             SSH1106_DrawPixel(no_wifi_img[i][0], no_wifi_img[i][1], 1);
         }
         sprintf(screen_str, "%02d%%", map_batt(adc_read(), ADC_MIN, ADC_MAX, BATT_MIN, BATT_MAX));
-        SSH1106_GotoXY(80, 40);
+        SSH1106_GotoXY(92, 38);
         SSH1106_Puts(screen_str, &Font_11x18, 1);
         SSH1106_UpdateScreen();
       }
@@ -435,14 +442,16 @@ void core1_entry() {
           SSH1106_UpdateScreen();
           samp_idx = 0;
           samp_idx_inner = 0;
+          int curr_amp = 0;
           while (samp_idx < NUM_BURSTS)
           {
-            uint16_t dac_value = ((mic_samp_buff[samp_idx][samp_idx_inner++] + 32768) >> 4) & 0xFFF;
-            DAC_data_0 = (DAC_config_chan_A | dac_value);
+            uint16_t dac_value = (mic_samp_buff[samp_idx][samp_idx_inner++] + 32768) >> 4;
+            DAC_data_0 = (DAC_config_chan_A | ((uint16_t)(dac_value * (curr_amp/100.0)) & 0x0FFF));
             spi_write16_blocking(SPI_PORT, &DAC_data_0, 1);
             if (samp_idx_inner == SAMPLE_BUFFER_SIZE)
             {
               samp_idx_inner = 0;
+              if (samp_idx < 100) curr_amp++;
               samp_idx++;
             }
             busy_wait_us(DELAY);
