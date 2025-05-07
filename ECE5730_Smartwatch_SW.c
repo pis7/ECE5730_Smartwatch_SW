@@ -25,6 +25,7 @@
 #include "dat/no_wifi_img.h"
 #include "dat/message_img.h"
 #include "dat/info_img.h"
+#include "dat/stopwatch_img.h"
 
 // Include WiFi library
 #include "wifi_udp.h"
@@ -55,30 +56,15 @@
 #define BATT_MIN 0
 #define BATT_MAX 100
 
-// Direct Digital Synthesis (DDS) parameters for DAC
-#define two32 4294967296.0 // 2^32 (a constant)
-#define Fs 50000
+// Audio variables
 #define DELAY 125 // 1/8000 (in microseconds)
-#define SOUND_DURATION 25000
-#define ALARM_NUM 0
-#define ALARM_IRQ TIMER_IRQ_0
 #define DAC_config_chan_A 0b0001000000000000
-#define sine_table_size 256
-volatile unsigned int STATE_0 = 0;
-volatile unsigned int count_0 = 0;
-volatile unsigned int phase_accum_main_0;
-volatile unsigned int phase_incr_main_0 = (400.0 * two32) / Fs;
-volatile unsigned int sound_curr_freq = 0;
-float current_amplitude_0 = 1.0;
-float sin_table[sine_table_size];
-int DAC_output_0;
-uint16_t DAC_data_0;
-int twinkle_twinkle[] = {261, 261, 392, 392, 440, 440, 392, 349, 349, 329, 329, 293, 293, 261};
-int tt_idx = 0;
 
+// Date and time variables
 extern datetime_t ntp_time;
 static bool ntp_time_initialized = false;
 
+// Text message variables
 #define BEACON_MSG_LEN_MAX 127
 static char last_message[BEACON_MSG_LEN_MAX] = "";
 char filtered_message[BEACON_MSG_LEN_MAX] = "\0";
@@ -88,19 +74,18 @@ char* mac = NULL;
 int port;
 int connect_status;
 
-typedef enum
-{
+typedef enum {
   MM_TIME,
   MM_HEART_RATE,
   MM_ACTIVITY,
-  MM_VOICE,
-  MM_MESSAGE,
+  MM_STOPWATCH,
+  MM_AUDIO,
+  MM_TEXT,
   MM_INFO,
 } main_menu_state_t;
 main_menu_state_t main_menu_state = MM_TIME;
 
-typedef enum
-{
+typedef enum {
   DB_NOT_PRESSED,
   DB_MAYBE_PRESSED,
   DB_PRESSED,
@@ -130,10 +115,10 @@ int done_rec = 0;
 
 // Heart rate variables
 sense_struct sense;
-#define RATE_SIZE 4 //Increase this for more averaging. 4 is good.
-uint8_t rates[RATE_SIZE]; //Array of heart rates
+#define RATE_SIZE 4
+uint8_t rates[RATE_SIZE];
 uint8_t rateSpot = 0;
-long lastBeat = 0; //Time at which the last beat occurred
+long lastBeat = 0;
 float beatsPerMinute;
 int beatAvg;
 int16_t IR_AC_Max = 20;
@@ -148,111 +133,133 @@ int16_t negativeEdge = 0;
 int32_t ir_avg_reg = 0;
 int16_t cbuf[32];
 uint8_t offset = 0;
-static const uint16_t FIRCoeffs[12] = {172, 321, 579, 927, 1360, 1858, 2390, 2916, 3391, 3768, 4012, 4096};
+static const uint16_t FIRCoeffs[12] = {172, 321, 579, 927, 1360, 1858, 2390, 
+                                       2916, 3391, 3768, 4012, 4096};
+
+// Stopwatch variables
+uint32_t sw_hours;
+uint32_t sw_mins;
+uint32_t sw_secs;
+uint32_t sw_decisecs;
+bool sw_en = false;
+absolute_time_t sw_start_time;
+
+// Screen string
+char screen_str[20];
 
 // Step tracking
 float prev_z;
 int step_count;
 
-void update_menu()
-{
+void update_menu() {
   int sel_pressed = gpio_get(SELECT_BUTTON);
-  switch (select_button_state)
-  {
-  case DB_NOT_PRESSED:
-    if (sel_pressed)
-      select_button_state = DB_MAYBE_PRESSED;
-    else
-      select_button_state = DB_NOT_PRESSED;
-    break;
-  case DB_MAYBE_PRESSED:
-    if (sel_pressed)
-    {
-      if (main_menu_state == MM_ACTIVITY || 
-          main_menu_state == MM_VOICE ||
-          main_menu_state == MM_MESSAGE ||
-          main_menu_state == MM_INFO ||
-          main_menu_state == MM_HEART_RATE) {
-        in_sub_menu = 1;
-        if (main_menu_state == MM_VOICE) done_rec = 0;
-        else SSH1106_Clear();
-        if (main_menu_state == MM_HEART_RATE) hr_on();
+  switch (select_button_state) {
+    case DB_NOT_PRESSED:
+      if (sel_pressed)
+        select_button_state = DB_MAYBE_PRESSED;
+      else
+        select_button_state = DB_NOT_PRESSED;
+      break;
+    case DB_MAYBE_PRESSED:
+      if (sel_pressed)
+      {
+        if (main_menu_state == MM_ACTIVITY ||
+            main_menu_state == MM_AUDIO ||
+            main_menu_state == MM_TEXT ||
+            main_menu_state == MM_INFO ||
+            main_menu_state == MM_HEART_RATE ||
+            main_menu_state == MM_STOPWATCH) {
+          if (in_sub_menu == 0) SSH1106_Clear();
+          if (main_menu_state == MM_AUDIO) done_rec = 0;
+          else if (main_menu_state == MM_HEART_RATE) hr_on();
+          else if (main_menu_state == MM_ACTIVITY && in_sub_menu == 1) step_count = 0;
+          else if (main_menu_state == MM_STOPWATCH) {
+            sprintf(screen_str, "%01u:%02u:%02u.%d", sw_hours, sw_mins, sw_secs, sw_decisecs);
+            SSH1106_GotoXY(20, 25);
+            SSH1106_Puts(screen_str, &Font_11x18, 1);
+            SSH1106_UpdateScreen();
+            if (in_sub_menu == 1) {
+              sw_start_time = get_absolute_time();
+              sw_en = !sw_en;
+            }
+          }
+          in_sub_menu = 1;
+        }
+        select_button_state = DB_PRESSED;
       }
-      select_button_state = DB_PRESSED;
-    }
-    else
+      else select_button_state = DB_NOT_PRESSED;
+      break;
+    case DB_PRESSED:
+      if (sel_pressed)
+        select_button_state = DB_PRESSED;
+      else
+        select_button_state = DB_MAYBE_NOT_PRESSED;
+      break;
+    case DB_MAYBE_NOT_PRESSED:
+      if (sel_pressed)
+        select_button_state = DB_PRESSED;
+      else
+        select_button_state = DB_NOT_PRESSED;
+      break;
+    default:
       select_button_state = DB_NOT_PRESSED;
-    break;
-  case DB_PRESSED:
-    if (sel_pressed)
-      select_button_state = DB_PRESSED;
-    else
-      select_button_state = DB_MAYBE_NOT_PRESSED;
-    break;
-  case DB_MAYBE_NOT_PRESSED:
-    if (sel_pressed)
-      select_button_state = DB_PRESSED;
-    else
-      select_button_state = DB_NOT_PRESSED;
-    break;
-  default:
-    select_button_state = DB_NOT_PRESSED;
-    break;
+      break;
   }
 
   int cyc_pressed = gpio_get(CYCLE_BUTTON);
-  switch (cycle_button_state)
-  {
-  case DB_NOT_PRESSED:
-    if (cyc_pressed)
-      cycle_button_state = DB_MAYBE_PRESSED;
-    else
-      cycle_button_state = DB_NOT_PRESSED;
-    break;
-  case DB_MAYBE_PRESSED:
-    if (cyc_pressed)
-    {
-      if (in_sub_menu)
-      {
-        in_sub_menu = 0;
-        if (main_menu_state == MM_HEART_RATE) hr_off();
-        done_rec = 0;
+  switch (cycle_button_state) {
+    case DB_NOT_PRESSED:
+      if (cyc_pressed)
+        cycle_button_state = DB_MAYBE_PRESSED;
+      else
+        cycle_button_state = DB_NOT_PRESSED;
+      break;
+    case DB_MAYBE_PRESSED:
+      if (cyc_pressed) {
+        if (in_sub_menu) {
+          in_sub_menu = 0;
+          if (main_menu_state == MM_HEART_RATE) hr_off();
+          else if (main_menu_state == MM_STOPWATCH) {
+            sw_en = false;
+            sw_hours = 0;
+            sw_mins = 0;
+            sw_secs = 0;
+            sw_decisecs = 0;
+          }
+          done_rec = 0;
+        } else 
+          main_menu_state = (main_menu_state == MM_INFO) ? MM_TIME : (main_menu_state + 1);
+        SSH1106_Clear();
+        cycle_button_state = DB_PRESSED;
       }
       else
-        main_menu_state = (main_menu_state == MM_INFO) ? MM_TIME : (main_menu_state + 1);
-      SSH1106_Clear();
-      cycle_button_state = DB_PRESSED;
-    }
-    else
+        cycle_button_state = DB_NOT_PRESSED;
+      break;
+    case DB_PRESSED:
+      if (cyc_pressed)
+        cycle_button_state = DB_PRESSED;
+      else
+        cycle_button_state = DB_MAYBE_NOT_PRESSED;
+      break;
+    case DB_MAYBE_NOT_PRESSED:
+      if (cyc_pressed)
+        cycle_button_state = DB_PRESSED;
+      else
+        cycle_button_state = DB_NOT_PRESSED;
+      break;
+    default:
       cycle_button_state = DB_NOT_PRESSED;
-    break;
-  case DB_PRESSED:
-    if (cyc_pressed)
-      cycle_button_state = DB_PRESSED;
-    else
-      cycle_button_state = DB_MAYBE_NOT_PRESSED;
-    break;
-  case DB_MAYBE_NOT_PRESSED:
-    if (cyc_pressed)
-      cycle_button_state = DB_PRESSED;
-    else
-      cycle_button_state = DB_NOT_PRESSED;
-    break;
-  default:
-    cycle_button_state = DB_NOT_PRESSED;
-    break;
+      break;
   }
 }
 
-int map_batt(int input, int input_min, int input_max, int output_min, int output_max)
-{
+int map_batt(int input, int input_min, int input_max, int output_min, int output_max) {
   int output = (int)((float)(input - input_min) / (float)(input_max - input_min) * (float)(output_max - output_min) + (float)output_min);
   output = ((output + 5) / 10) * 10;
   return output;
 }
 
-void on_pdm_samples_ready()
-{
+void on_pdm_samples_ready() {
   pdm_microphone_read(mic_samp_buff[samp_idx++], SAMPLE_BUFFER_SIZE);
 }
 
@@ -273,275 +280,275 @@ void core1_entry() {
   sprintf(time_str, "%02u:%02u:%02u", hours, minutes, seconds);
   sprintf(prev_time_str, "%s", time_str);
 
-  // Screen string
-  char screen_str[20];
+  // Audio variables
+  uint16_t dac_value, dac_msg;
 
-  // Build the sine lookup table
-  // scaled to produce values between 0 and 4096 (for 12-bit DAC)
-  int ii;
-  for (ii = 0; ii < sine_table_size; ii++)
-  {
-    sin_table[ii] = 2047.0 * sin((float)ii * 6.283 / (float)sine_table_size);
-  }
-  
+  // Screen status variables
   int screen_rd = 0;
   int screen_status = 1;
 
-  while (true)
-  {
+  while (true) {
     update_menu();
     update_step(&prev_z, &step_count);
     screen_rd = check_screen();
-    if (screen_rd == 1) screen_status = 1;
+    if (screen_rd == 1)  screen_status = 1;
     if (screen_rd == -1) screen_status = 0;
     if (screen_status) {
-    switch (main_menu_state)
-    {
-    case MM_TIME:
-    {
-      if (!ntp_time_initialized && ntp_time_ready)
-      {
-        datetime_t now;
-        get_current_ntp_time(&now);
-        hours = now.hour;
-        minutes = now.min;
-        seconds = now.sec;
-        month = now.month;
-        day = now.day;
-        prev_seconds = seconds;
-        ntp_time_initialized = true;
-        last_time_update = get_absolute_time();
-      } else if (ntp_time_initialized) {
-        if (absolute_time_diff_us(last_time_update, get_absolute_time()) >= 1000000) {
-          sprintf(prev_time_str, "%s", time_str);
-          last_time_update = get_absolute_time();
-          seconds++;
-          if (seconds >= 60) {
-            seconds = 0;
-            minutes++;
-          }
-          if (minutes >= 60) {
-            minutes = 0;
-            hours++;
-          }
-          if (hours >= 24){
-            hours = 0;
-          }
-          sprintf(time_str, "%02u:%02u:%02u", hours, minutes, seconds);
-        }
-        sprintf(date_str, "%02u/%02u", month, day);
-      } else {
-        sprintf(prev_time_str, "%s", time_str);
-        uptime_ms = time_us_64() / 1000;
-        hours = (uptime_ms / (1000 * 60 * 60)) % 24;
-        minutes = (uptime_ms / (1000 * 60)) % 60;
-        seconds = (uptime_ms / 1000) % 60;
-        sprintf(time_str, "%02u:%02u:%02u", hours, minutes, seconds);
-      }
-  
-      if (seconds != prev_seconds) {
-        prev_seconds = seconds;
-
-        SSH1106_GotoXY(25, 10);
-        SSH1106_Puts(prev_time_str, &Font_11x18, 0);
-        SSH1106_GotoXY(25, 10);
-        SSH1106_Puts(time_str, &Font_11x18, 1);
-
-        SSH1106_GotoXY(47, 42);
-        SSH1106_Puts(date_str, &Font_7x10, 1);
-
-        if (!connect_status) {
-          for (int i = 0; i < sizeof(wifi_img) / sizeof(wifi_img[0]); i++)
-            SSH1106_DrawPixel(wifi_img[i][0], wifi_img[i][1], 1);
-        } else {
-          for (int i = 0; i < sizeof(no_wifi_img) / sizeof(no_wifi_img[0]); i++)
-            SSH1106_DrawPixel(no_wifi_img[i][0], no_wifi_img[i][1], 1);
-        }
-        sprintf(screen_str, "%02d%%", map_batt(adc_read(), ADC_MIN, ADC_MAX, BATT_MIN, BATT_MAX));
-        SSH1106_GotoXY(92, 38);
-        SSH1106_Puts(screen_str, &Font_11x18, 1);
-        SSH1106_UpdateScreen();
-      }
-      break;
-    }
-    case MM_HEART_RATE:
-      if (in_sub_menu)
-      {
-        long irValue = getIR(&sense);
-
-        if (checkForBeat(irValue, &IR_AC_Max, &IR_AC_Min,
-          &IR_AC_Signal_Current, &IR_AC_Signal_Previous,
-          &IR_AC_Signal_min, &IR_AC_Signal_max, &IR_Average_Estimated,
-          &positiveEdge, &negativeEdge, &ir_avg_reg,
-          cbuf, &offset, FIRCoeffs)) {
-
-          long delta = to_ms_since_boot(get_absolute_time()) - lastBeat;
-          lastBeat = to_ms_since_boot(get_absolute_time());
-      
-          beatsPerMinute = 60 / (delta / 1000.0);
-      
-          if (beatsPerMinute < 255 && beatsPerMinute > 20)
+      switch (main_menu_state) {
+        case MM_TIME:
+          if (!ntp_time_initialized && ntp_time_ready)
           {
-            rates[rateSpot++] = (uint8_t)beatsPerMinute; //Store this reading in the array
-            rateSpot %= RATE_SIZE; //Wrap variable
-      
-            //Take average of readings
-            beatAvg = 0;
-            for (uint8_t x = 0 ; x < RATE_SIZE ; x++)
-              beatAvg += rates[x];
-            beatAvg /= RATE_SIZE;
-          }
-        }
-        sprintf(screen_str, "BPM: %d", beatAvg);
-        SSH1106_GotoXY(15, 25);
-        SSH1106_Puts(screen_str, &Font_11x18, 1);
-      } else {
-        for (int i = 0; i < sizeof(heartrate_img) / sizeof(heartrate_img[0]); i++)
-          SSH1106_DrawPixel(heartrate_img[i][0], heartrate_img[i][1], 1);
-      }
-      SSH1106_UpdateScreen();
-      break;
-    case MM_ACTIVITY:
-      if (in_sub_menu)
-      {
-        for (int i = 0; i < 128; i++)
-          for (int j = 0; j < 64; j++)
-            SSH1106_DrawPixel(i, j, SSH1106_COLOR_BLACK);
-        sprintf(screen_str, "Steps: %d", step_count);
-        SSH1106_GotoXY(10, 25);
-        SSH1106_Puts(screen_str, &Font_11x18, 1);
-      }
-      else
-      {
-        for (int i = 0; i < sizeof(activity_img) / sizeof(activity_img[0]); i++)
-          SSH1106_DrawPixel(activity_img[i][0], activity_img[i][1], 1);
-      }
-      SSH1106_UpdateScreen();
-      break;
-    case MM_VOICE:
-      if (in_sub_menu)
-      {
-        if (!done_rec)
-        {
-          SSH1106_Clear();
-          sprintf(screen_str, "Recording");
-          SSH1106_GotoXY(20, 25);
-          SSH1106_Puts(screen_str, &Font_11x18, 1);
-          SSH1106_UpdateScreen();
-          samp_idx = 0;
-          pdm_microphone_start();
-          while (samp_idx < NUM_BURSTS)
-          {
-            tight_loop_contents();
-          }
-          pdm_microphone_stop();
-          SSH1106_Clear();
-          sprintf(screen_str, "Playback");
-          SSH1106_GotoXY(20, 25);
-          SSH1106_Puts(screen_str, &Font_11x18, 1);
-          SSH1106_UpdateScreen();
-          samp_idx = 0;
-          samp_idx_inner = 0;
-          int curr_amp = 0;
-          while (samp_idx < NUM_BURSTS)
-          {
-            uint16_t dac_value = (mic_samp_buff[samp_idx][samp_idx_inner++] + 32768) >> 4;
-            DAC_data_0 = (DAC_config_chan_A | ((uint16_t)(dac_value * (curr_amp/100.0)) & 0x0FFF));
-            spi_write16_blocking(SPI_PORT, &DAC_data_0, 1);
-            if (samp_idx_inner == SAMPLE_BUFFER_SIZE)
-            {
-              samp_idx_inner = 0;
-              if (samp_idx < 100) curr_amp++;
-              samp_idx++;
+            datetime_t now;
+            get_current_ntp_time(&now);
+            hours = now.hour;
+            minutes = now.min;
+            seconds = now.sec;
+            month = now.month;
+            day = now.day;
+            prev_seconds = seconds;
+            ntp_time_initialized = true;
+            last_time_update = get_absolute_time();
+            sprintf(time_str, "%02u:%02u:%02u", hours, minutes, seconds);
+          } else if (ntp_time_initialized) {
+            if (absolute_time_diff_us(last_time_update, get_absolute_time()) >= 1000000) {
+              sprintf(prev_time_str, "%s", time_str);
+              last_time_update = get_absolute_time();
+              seconds++;
+              if (seconds >= 60) {
+                seconds = 0;
+                minutes++;
+              }
+              if (minutes >= 60) {
+                minutes = 0;
+                hours++;
+              }
+              if (hours >= 24){
+                hours = 0;
+              }
+              sprintf(time_str, "%02u:%02u:%02u", hours, minutes, seconds);
             }
-            busy_wait_us(DELAY);
+            sprintf(date_str, "%02u/%02u", month, day);
+          } else {
+            sprintf(prev_time_str, "%s", time_str);
+            uptime_ms = time_us_64() / 1000;
+            hours = (uptime_ms / (1000 * 60 * 60)) % 24;
+            minutes = (uptime_ms / (1000 * 60)) % 60;
+            seconds = (uptime_ms / 1000) % 60;
+            sprintf(time_str, "%02u:%02u:%02u", hours, minutes, seconds);
+            sprintf(date_str, "%02u/%02u", month, day);
           }
-          samp_idx = 0;
-          samp_idx_inner = 0;
-          done_rec = 1;
-        }
-      }
-      else
-      {
-        for (int i = 0; i < sizeof(mic_img) / sizeof(mic_img[0]); i++)
-          SSH1106_DrawPixel(mic_img[i][0], mic_img[i][1], 1);
-      }
-      SSH1106_UpdateScreen();
-      break;
-    case MM_MESSAGE:
-    {
-      if (in_sub_menu)
-      {
-        int ypos = 10;
-        for (int i = 0; i < 128; i++)
-          for (int j = 0; j < 64; j++)
-            SSH1106_DrawPixel(i, j, SSH1106_COLOR_BLACK);
-        char line_buffer[17]; // Buffer to hold each line (16 chars + null terminator)
-        int line_start = 0;
-        int line_end = 0;
+      
+          if (seconds != prev_seconds) {
+            prev_seconds = seconds;
 
-        while (filtered_message[line_end] != '\0') {
-          // Look for the next newline or end of string
-          while (filtered_message[line_end] != '\n' && filtered_message[line_end] != '\0') {
-            line_end++;
+            SSH1106_GotoXY(25, 10);
+            SSH1106_Puts(prev_time_str, &Font_11x18, 0);
+            SSH1106_GotoXY(25, 10);
+            SSH1106_Puts(time_str, &Font_11x18, 1);
+
+            SSH1106_GotoXY(47, 42);
+            SSH1106_Puts(date_str, &Font_7x10, 1);
+
+            if (!connect_status) {
+              for (int i = 0; i < sizeof(wifi_img) / sizeof(wifi_img[0]); i++)
+                SSH1106_DrawPixel(wifi_img[i][0], wifi_img[i][1], 1);
+            } else {
+              for (int i = 0; i < sizeof(no_wifi_img) / sizeof(no_wifi_img[0]); i++)
+                SSH1106_DrawPixel(no_wifi_img[i][0], no_wifi_img[i][1], 1);
+            }
+            sprintf(screen_str, "%02d%%", map_batt(adc_read(), ADC_MIN, ADC_MAX, BATT_MIN, BATT_MAX));
+            SSH1106_GotoXY(92, 38);
+            SSH1106_Puts(screen_str, &Font_11x18, 1);
+            SSH1106_UpdateScreen();
           }
+          break;
+        case MM_HEART_RATE:
+          if (in_sub_menu) {
+            long irValue = getIR(&sense);
 
-          // Copy the line into the buffer
-          int line_length = line_end - line_start;
-          strncpy(line_buffer, &filtered_message[line_start], line_length);
-          line_buffer[line_length] = '\0'; // Null-terminate the line
+            if (checkForBeat(irValue, &IR_AC_Max, &IR_AC_Min,
+              &IR_AC_Signal_Current, &IR_AC_Signal_Previous,
+              &IR_AC_Signal_min, &IR_AC_Signal_max, &IR_Average_Estimated,
+              &positiveEdge, &negativeEdge, &ir_avg_reg,
+              cbuf, &offset, FIRCoeffs)) {
 
-          // Display the line on the screen
-          SSH1106_GotoXY(10, ypos);
-          SSH1106_Puts(line_buffer, &Font_7x10, 1);
-          ypos += 10; // Move to the next line position
-
-          // If we hit a newline, skip it
-          if (filtered_message[line_end] == '\n') {
-            line_end++;
+              long delta = to_ms_since_boot(get_absolute_time()) - lastBeat;
+              lastBeat = to_ms_since_boot(get_absolute_time());
+          
+              beatsPerMinute = 60 / (delta / 1000.0);
+          
+              if (beatsPerMinute < 255 && beatsPerMinute > 20)
+              {
+                rates[rateSpot++] = (uint8_t)beatsPerMinute; //Store this reading in the array
+                rateSpot %= RATE_SIZE; //Wrap variable
+          
+                //Take average of readings
+                beatAvg = 0;
+                for (uint8_t x = 0 ; x < RATE_SIZE ; x++)
+                  beatAvg += rates[x];
+                beatAvg /= RATE_SIZE;
+              }
+            }
+            sprintf(screen_str, "BPM: %d", beatAvg);
+            SSH1106_GotoXY(15, 25);
+            SSH1106_Puts(screen_str, &Font_11x18, 1);
+          } else {
+            for (int i = 0; i < sizeof(heartrate_img) / sizeof(heartrate_img[0]); i++)
+              SSH1106_DrawPixel(heartrate_img[i][0], heartrate_img[i][1], 1);
           }
+          SSH1106_UpdateScreen();
+          break;
+        case MM_ACTIVITY:
+          if (in_sub_menu) {
+            for (int i = 0; i < 128; i++)
+              for (int j = 0; j < 64; j++)
+                SSH1106_DrawPixel(i, j, SSH1106_COLOR_BLACK);
+            sprintf(screen_str, "Steps: %d", step_count);
+            SSH1106_GotoXY(10, 25);
+            SSH1106_Puts(screen_str, &Font_11x18, 1);
+          } else {
+            for (int i = 0; i < sizeof(activity_img) / sizeof(activity_img[0]); i++)
+              SSH1106_DrawPixel(activity_img[i][0], activity_img[i][1], 1);
+          }
+          SSH1106_UpdateScreen();
+          break;
+        case MM_STOPWATCH:
+          if (in_sub_menu) {
+            if (sw_en) {
+              if (sw_decisecs > 9) {
+                sw_decisecs = 0;
+                sw_secs++;
+              }
+              if (sw_secs > 59) {
+                sw_secs = 0;
+                sw_mins++;
+              }
+              if (sw_mins > 59) {
+                sw_mins = 0;
+                sw_hours++;
+              }
+              if (sw_hours > 9) {
+                sw_hours = 0;
+              }
+              if (absolute_time_diff_us(sw_start_time, get_absolute_time()) >= 100000) {
+                sw_start_time = get_absolute_time();
+                sprintf(screen_str, "%01u:%02u:%02u.%d", sw_hours, sw_mins, sw_secs, sw_decisecs);
+                SSH1106_GotoXY(20, 25);
+                SSH1106_Puts(screen_str, &Font_11x18, 1);
+                SSH1106_UpdateScreen();
+                sw_decisecs++;
+              }
+            }
+          } else {
+            for (int i = 0; i < sizeof(stopwatch_img) / sizeof(stopwatch_img[0]); i++)
+              SSH1106_DrawPixel(stopwatch_img[i][0], stopwatch_img[i][1], 1);
+            SSH1106_UpdateScreen();
+          }
+          break;
+        case MM_AUDIO:
+          if (in_sub_menu) {
+            if (!done_rec) {
+              SSH1106_Clear();
+              sprintf(screen_str, "Recording");
+              SSH1106_GotoXY(20, 25);
+              SSH1106_Puts(screen_str, &Font_11x18, 1);
+              SSH1106_UpdateScreen();
+              samp_idx = 0;
+              pdm_microphone_start();
+              while (samp_idx < NUM_BURSTS) tight_loop_contents();
+              pdm_microphone_stop();
+              SSH1106_Clear();
+              sprintf(screen_str, "Playback");
+              SSH1106_GotoXY(20, 25);
+              SSH1106_Puts(screen_str, &Font_11x18, 1);
+              SSH1106_UpdateScreen();
+              samp_idx = 0;
+              samp_idx_inner = 0;
+              while (samp_idx < NUM_BURSTS) {
+                dac_value = (mic_samp_buff[samp_idx][samp_idx_inner++] + 32768) >> 4;
+                dac_msg = (DAC_config_chan_A | (dac_value & 0x0FFF));
+                spi_write16_blocking(SPI_PORT, &dac_msg, 1);
+                if (samp_idx_inner == SAMPLE_BUFFER_SIZE) {
+                  samp_idx_inner = 0;
+                  samp_idx++;
+                }
+                busy_wait_us(DELAY);
+              }
+              samp_idx = 0;
+              samp_idx_inner = 0;
+              done_rec = 1;
+            }
+          } else {
+            for (int i = 0; i < sizeof(mic_img) / sizeof(mic_img[0]); i++)
+              SSH1106_DrawPixel(mic_img[i][0], mic_img[i][1], 1);
+          }
+          SSH1106_UpdateScreen();
+          break;
+        case MM_TEXT:
+          if (in_sub_menu) {
+            int ypos = 10;
+            for (int i = 0; i < 128; i++)
+              for (int j = 0; j < 64; j++)
+                SSH1106_DrawPixel(i, j, SSH1106_COLOR_BLACK);
+            char line_buffer[17]; // Buffer to hold each line (16 chars + null terminator)
+            int line_start = 0;
+            int line_end = 0;
 
-          // Update the start position for the next line
-          line_start = line_end;
-        }
+            while (filtered_message[line_end] != '\0') {
+              // Look for the next newline or end of string
+              while (filtered_message[line_end] != '\n' && filtered_message[line_end] != '\0') {
+                line_end++;
+              }
+
+              // Copy the line into the buffer
+              int line_length = line_end - line_start;
+              strncpy(line_buffer, &filtered_message[line_start], line_length);
+              line_buffer[line_length] = '\0'; // Null-terminate the line
+
+              // Display the line on the screen
+              SSH1106_GotoXY(10, ypos);
+              SSH1106_Puts(line_buffer, &Font_7x10, 1);
+              ypos += 10; // Move to the next line position
+
+              // If we hit a newline, skip it
+              if (filtered_message[line_end] == '\n') {
+                line_end++;
+              }
+
+              // Update the start position for the next line
+              line_start = line_end;
+            }
+          } else {
+            for (int i = 0; i < sizeof(message_img) / sizeof(message_img[0]); i++)
+              SSH1106_DrawPixel(message_img[i][0], message_img[i][1], 1);
+          }
+          SSH1106_UpdateScreen();
+          break;
+        case MM_INFO:
+          if (in_sub_menu) {
+            sprintf(screen_str, "IP: %s", ip);
+            SSH1106_GotoXY(10, 10);
+            SSH1106_Puts(screen_str, &Font_7x10, 1);
+            sprintf(screen_str, "Port: %d, MAC: ", port);
+            SSH1106_GotoXY(10, 25);
+            SSH1106_Puts(screen_str, &Font_7x10, 1);
+            sprintf(screen_str, "%s", mac);
+            SSH1106_GotoXY(10, 40);
+            SSH1106_Puts(screen_str, &Font_7x10, 1);
+          } else {
+            for (int i = 0; i < sizeof(info_img) / sizeof(info_img[0]); i++)
+              SSH1106_DrawPixel(info_img[i][0], info_img[i][1], 1);
+          }
+          SSH1106_UpdateScreen();
+          break;
       }
-      else
-      {
-        for (int i = 0; i < sizeof(message_img) / sizeof(message_img[0]); i++)
-          SSH1106_DrawPixel(message_img[i][0], message_img[i][1], 1);
-      }
-      SSH1106_UpdateScreen();
-      break;
+    } else {
+      for (int i = 0; i < 128; i++)
+        for (int j = 0; j < 64; j++)
+          SSH1106_DrawPixel(i, j, SSH1106_COLOR_BLACK);
+      SSH1106_UpdateScreen(); 
     }
-    case MM_INFO:
-      if (in_sub_menu)
-      {
-        sprintf(screen_str, "IP: %s", ip);
-        SSH1106_GotoXY(10, 10);
-        SSH1106_Puts(screen_str, &Font_7x10, 1);
-        sprintf(screen_str, "Port: %d, MAC: ", port);
-        SSH1106_GotoXY(10, 25);
-        SSH1106_Puts(screen_str, &Font_7x10, 1);
-        sprintf(screen_str, "%s", mac);
-        SSH1106_GotoXY(10, 40);
-        SSH1106_Puts(screen_str, &Font_7x10, 1);
-      }
-      else
-      {
-        for (int i = 0; i < sizeof(info_img) / sizeof(info_img[0]); i++)
-          SSH1106_DrawPixel(info_img[i][0], info_img[i][1], 1);
-      }
-      SSH1106_UpdateScreen();
-      break;
-    }
-  } else {
-    for (int i = 0; i < 128; i++)
-      for (int j = 0; j < 64; j++)
-        SSH1106_DrawPixel(i, j, SSH1106_COLOR_BLACK);
-    SSH1106_UpdateScreen(); 
   }
-  }
-
 }
 
 int main()
