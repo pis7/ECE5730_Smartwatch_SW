@@ -416,8 +416,10 @@ uint32_t red;
               }
       
               sprintf(screen_str, "BPM: %d", beatAvg);
-              sprintf(screen_str, "SPO2: %d", pn_spo2);
               SSH1106_GotoXY(15, 25);
+              SSH1106_Puts(screen_str, &Font_11x18, 1);
+              sprintf(screen_str, "SPO2: %d", pn_spo2);
+              SSH1106_GotoXY(15, 35);
               SSH1106_Puts(screen_str, &Font_11x18, 1);
             } else {
               for (int i = 0; i < sizeof(heartrate_img) / sizeof(heartrate_img[0]); i++)

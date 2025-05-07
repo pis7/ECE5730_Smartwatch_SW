@@ -118,13 +118,19 @@ int MAX3010x_ReadTemp() {
 }
 
 void MAX3010x_ReadFIFO(uint32_t *red, uint32_t *irValue) {
-    uint8_t reg = 0x07;
-    uint8_t data[6];
-    i2c_write_blocking(I2C_CHAN, MAX30105_I2C_ADDR, &reg, 1, true);
-    i2c_read_blocking(I2C_CHAN, MAX30105_I2C_ADDR, data, 6, false);
-
-    *red = ((uint32_t)(data[0]) << 16) | ((uint32_t)(data[1]) << 8) | data[2];
-    *irValue  = ((uint32_t)(data[3]) << 16) | ((uint32_t)(data[4]) << 8) | data[5];
+  uint8_t fifo_data_reg = 0x07;
+  i2c_write_blocking(I2C_CHAN, MAX30105_I2C_ADDR, &fifo_data_reg, 1, true);
+  uint8_t temp[6];
+  uint32_t tempLong;
+  i2c_read_blocking(I2C_CHAN, MAX30105_I2C_ADDR, temp, 6, false);
+  uint8_t red_temp[4] = {temp[2], temp[1], temp[0], 0x00};
+  uint8_t ir_temp[4] = {temp[5], temp[4], temp[3], 0x00};
+  memcpy(&tempLong, red_temp, sizeof(tempLong));
+  tempLong &= 0x3FFFF; //Zero out all but 18 bits
+  *red = tempLong;
+  memcpy(&tempLong, ir_temp, sizeof(tempLong));
+  tempLong &= 0x3FFFF; //Zero out all but 18 bits
+  *irValue = tempLong;
 }
 
 bool checkForBeat(int32_t sample, int16_t* IR_AC_Max, int16_t* IR_AC_Min, 

@@ -58,6 +58,7 @@ target_sources(ECE5730_Smartwatch_SW PRIVATE
     heart_sensor_bpm.c
     OpenPDMFilter.c
     pdm_microphone.c
+    spo2.c
     )
 
 # must match with executable name
