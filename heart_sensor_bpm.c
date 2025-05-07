@@ -214,3 +214,23 @@ int32_t mul16(int16_t x, int16_t y)
 {
   return((long)x * (long)y);
 }
+
+bool MAX3010x_read_spo2(uint16_t *red, uint16_t *irValue) {
+  uint8_t data[6];
+  uint8_t fifo_data_reg = 0x07;
+
+  if (i2c_write_blocking(i2c0, MAX30105_I2C_ADDR, &fifo_data_reg, 1, true) != 1) {
+      return false;
+  }
+  if (i2c_read_blocking(i2c0, MAX30105_I2C_ADDR, data, 6, false) != 6) {
+      return false;
+  }
+
+  uint32_t ir_raw = ((uint32_t)data[0] << 16) | ((uint32_t)data[1] << 8) | data[2];
+  uint32_t red_raw = ((uint32_t)data[3] << 16) | ((uint32_t)data[4] << 8) | data[5];
+
+  *irValue = (uint16_t)(ir_raw >> 8);   // keep top 16 bits
+  *red = (uint16_t)(red_raw >> 8);
+
+  return true;
+}
