@@ -118,6 +118,7 @@
  
  // Heart rate variables
  sense_struct sense;
+ sense_struct sense_hr;
  #define RATE_SIZE 4
  uint8_t rates[RATE_SIZE];
  uint8_t rateSpot = 0;
@@ -138,17 +139,20 @@
  uint8_t offset = 0;
  static const uint16_t FIRCoeffs[12] = {172, 321, 579, 927, 1360, 1858, 2390, 
                                         2916, 3391, 3768, 4012, 4096};
+ bool heartrate_screen = true;
                             
 //SPO2 variables
-int32_t n_ir_buffer_length = 100;
-int32_t pun_ir_buffer[100];
-int32_t pun_red_buffer[100];
+#define HR_BUFFER_LENGTH 100
+int32_t pun_ir_buffer[HR_BUFFER_LENGTH];
+int32_t pun_red_buffer[HR_BUFFER_LENGTH];
 int32_t pn_spo2 = 0;
+int32_t pn_spo2_prev = 0;
 int8_t pch_spo2_valid = 0;
 int32_t pn_heart_rate = 0;
 int8_t pch_hr_valid = 0;
 static int spo2_index = 0;
 uint32_t red;
+long spo2_time_offset = 0;
  
  // Stopwatch variables
  uint32_t sw_hours;
@@ -185,9 +189,20 @@ uint32_t red;
              main_menu_state == MM_STOPWATCH) {
            if (in_sub_menu == 0) SSH1106_Clear();
            if (main_menu_state == MM_AUDIO) done_rec = 0;
-           else if (main_menu_state == MM_HEART_RATE) hr_on();
+           else if (main_menu_state == MM_HEART_RATE && in_sub_menu == 0) {
+            hr_on();
+            sprintf(screen_str, "BPM: %d", pn_heart_rate);
+            SSH1106_GotoXY(15, 15);
+            SSH1106_Puts(screen_str, &Font_11x18, 1);
+            sprintf(screen_str, "SPO2: %d", pn_spo2 < 0 ? 0 : pn_spo2);
+            SSH1106_GotoXY(15, 35);
+            SSH1106_Puts(screen_str, &Font_11x18, 1);
+            SSH1106_UpdateScreen();
+           } else if (main_menu_state == MM_HEART_RATE && in_sub_menu == 1) {
+            heartrate_screen = !heartrate_screen;
+           }
            else if (main_menu_state == MM_ACTIVITY && in_sub_menu == 1) step_count = 0;
-           else if (main_menu_state == MM_STOPWATCH) {
+           else if (main_menu_state == MM_STOPWATCH && in_sub_menu == 0) {
              sprintf(screen_str, "%01u:%02u:%02u.%d", sw_hours, sw_mins, sw_secs, sw_decisecs);
              SSH1106_GotoXY(20, 25);
              SSH1106_Puts(screen_str, &Font_11x18, 1);
@@ -232,7 +247,10 @@ uint32_t red;
        if (cyc_pressed) {
          if (in_sub_menu) {
            in_sub_menu = 0;
-           if (main_menu_state == MM_HEART_RATE) hr_off();
+           if (main_menu_state == MM_HEART_RATE) {
+            hr_off();
+            heartrate_screen = true;
+           }
            else if (main_menu_state == MM_STOPWATCH) {
              sw_en = false;
              sw_hours = 0;
@@ -379,19 +397,16 @@ uint32_t red;
            case MM_HEART_RATE:
             if (in_sub_menu)
             {
-              long irValue = getIR(&sense);
-      
-              MAX3010x_ReadFIFO(&red, &irValue);
-                pun_ir_buffer[spo2_index] = red;
-                pun_red_buffer[spo2_index] = irValue;
-                spo2_index++;
-      
-                if (checkForBeat(irValue, &IR_AC_Max, &IR_AC_Min,
+              for (int i = 0; i < 128; i++)
+                for (int j = 0; j < 64; j++)
+                  SSH1106_DrawPixel(i, j, SSH1106_COLOR_BLACK);
+              if (heartrate_screen) {
+                if (checkForBeat(getIR(&sense_hr), &IR_AC_Max, &IR_AC_Min,
                   &IR_AC_Signal_Current, &IR_AC_Signal_Previous,
                   &IR_AC_Signal_min, &IR_AC_Signal_max, &IR_Average_Estimated,
                   &positiveEdge, &negativeEdge, &ir_avg_reg,
                   cbuf, &offset, FIRCoeffs)) {
-      
+    
                   long delta = to_ms_since_boot(get_absolute_time()) - lastBeat;
                   lastBeat = to_ms_since_boot(get_absolute_time());
               
@@ -408,19 +423,39 @@ uint32_t red;
                       beatAvg += rates[x];
                     beatAvg /= RATE_SIZE;
                   }
+                }
+                sprintf(screen_str, "BPM: %d", beatAvg);
+                SSH1106_GotoXY(15, 25);
+                SSH1106_Puts(screen_str, &Font_11x18, 1);
+              } else {
+                for (int i = HR_BUFFER_LENGTH/4; i < HR_BUFFER_LENGTH; i++) {
+                  pun_ir_buffer[i - HR_BUFFER_LENGTH/4] = pun_ir_buffer[i];
+                  pun_red_buffer[i - HR_BUFFER_LENGTH/4] = pun_red_buffer[i];
+                }
+                for (int i = 3*HR_BUFFER_LENGTH/4; i < HR_BUFFER_LENGTH; i++) {
+                  while (!MAX3010x_available(&sense)) check_hr(&sense);
+                  pun_red_buffer[i] = getRed(&sense);
+                  pun_ir_buffer[i] = getIR(&sense);
+                  MAX3010x_next_sample(&sense);
+                  maxim_heart_rate_and_oxygen_saturation(
+                    pun_ir_buffer, 
+                    HR_BUFFER_LENGTH, 
+                    pun_red_buffer, 
+                    &pn_spo2, 
+                    &pch_spo2_valid, 
+                    &pn_heart_rate, 
+                    &pch_hr_valid
+                  );
+                }
+                if (!pch_spo2_valid) {
+                  sprintf(screen_str, "SPO2: %d", pn_spo2_prev);
+                } else {
+                  sprintf(screen_str, "SPO2: %d", pn_spo2);
+                  pn_spo2_prev = pn_spo2;
+                }
+                SSH1106_GotoXY(15, 25);
+                SSH1106_Puts(screen_str, &Font_11x18, 1);
               }
-      
-              if (spo2_index >= 100) {
-                maxim_heart_rate_and_oxygen_saturation(pun_ir_buffer, n_ir_buffer_length, pun_red_buffer, &pn_spo2, &pch_spo2_valid, 
-                  &pn_heart_rate, &pch_hr_valid);
-              }
-      
-              sprintf(screen_str, "BPM: %d", beatAvg);
-              SSH1106_GotoXY(15, 25);
-              SSH1106_Puts(screen_str, &Font_11x18, 1);
-              sprintf(screen_str, "SPO2: %d", pn_spo2);
-              SSH1106_GotoXY(15, 35);
-              SSH1106_Puts(screen_str, &Font_11x18, 1);
             } else {
               for (int i = 0; i < sizeof(heartrate_img) / sizeof(heartrate_img[0]); i++)
                 SSH1106_DrawPixel(heartrate_img[i][0], heartrate_img[i][1], 1);
@@ -443,6 +478,9 @@ uint32_t red;
            break;
          case MM_STOPWATCH:
            if (in_sub_menu) {
+            for (int i = 0; i < 128; i++)
+              for (int j = 0; j < 64; j++)
+                SSH1106_DrawPixel(i, j, SSH1106_COLOR_BLACK);
              if (sw_en) {
                if (sw_decisecs > 9) {
                  sw_decisecs = 0;

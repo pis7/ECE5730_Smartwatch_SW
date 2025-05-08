@@ -10,7 +10,7 @@ void MAX3010x_Init() {
     uint8_t spo2_cfg[2] = {0x0A, 0x2F};
     i2c_write_blocking(I2C_CHAN, MAX30105_I2C_ADDR, spo2_cfg, 2, false); // 4096 ADC range, 400 samples/sec, 411 us pulse width
 
-    uint8_t red_pa[2] = {0x0C, 0x0A};
+    uint8_t red_pa[2] = {0x0C, 0x1F};
     i2c_write_blocking(I2C_CHAN, MAX30105_I2C_ADDR, red_pa, 2, false); // Set Red LED to 10mA
 
     uint8_t ir_pa[2] = {0x0D, 0x1F};
@@ -102,9 +102,27 @@ bool safeCheck(uint8_t timeout, sense_struct *sense) {
   }
 }
 
+uint32_t getRed(sense_struct *sense) {
+  if(safeCheck(250, sense)) return (sense->red[sense->head]);
+  else return 0;
+}
+
 uint32_t getIR(sense_struct *sense) {
   if(safeCheck(250, sense)) return (sense->IR[sense->head]);
   else return 0;
+}
+
+uint8_t MAX3010x_available(sense_struct *sense) {
+  int8_t num_samples = sense->head - sense->tail;
+  if (num_samples < 0) num_samples += HR_STORAGE_SIZE; //Wrap condition
+  return (uint8_t)num_samples;
+}
+
+void MAX3010x_next_sample(sense_struct *sense) {
+  if (MAX3010x_available(sense)){
+    sense->tail++; //Advance the tail of the storage struct
+    sense->tail %= HR_STORAGE_SIZE; //Wrap condition
+  }
 }
 
 int MAX3010x_ReadTemp() {
