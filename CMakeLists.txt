@@ -55,10 +55,9 @@ target_sources(ECE5730_Smartwatch_SW PRIVATE
     ssh1106.c
     i3g4250d.c
     wifi_udp.c
-    heart_sensor_bpm.c
+    max30102.c
     OpenPDMFilter.c
     pdm_microphone.c
-    spo2.c
     )
 
 # must match with executable name

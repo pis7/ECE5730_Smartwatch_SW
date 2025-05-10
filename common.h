@@ -14,14 +14,13 @@
 #include "pico/time.h"
 
 // Include hardware libraries
-#include "hardware/pwm.h"
 #include "hardware/dma.h"
-#include "hardware/irq.h"
 #include "hardware/adc.h"
 #include "hardware/pio.h"
 #include "hardware/i2c.h"
 #include "hardware/spi.h"
 #include "hardware/clocks.h"
+#include "hardware/rtc.h"
 
 // SPI configurations
 #define PIN_SCK  2
