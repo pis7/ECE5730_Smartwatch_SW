@@ -160,6 +160,7 @@ char screen_str[20];
 float prev_z;
 int   step_count;
 
+// Update the main menu screen based on button presses
 void update_menu() {
   int sel_pressed = gpio_get(SELECT_BUTTON);
   switch (select_button_state) {
@@ -185,9 +186,8 @@ void update_menu() {
             SSH1106_GotoXY(15, 25);
             SSH1106_Puts(screen_str, &Font_11x18, 1);
             SSH1106_UpdateScreen();
-          } else if (main_menu_state == MM_HEART_RATE && in_sub_menu == 1) {
+          } else if (main_menu_state == MM_HEART_RATE && in_sub_menu == 1)
             hr_screen = !hr_screen;
-          }
           else if (main_menu_state == MM_ACTIVITY && in_sub_menu == 1) step_count = 0;
           else if (main_menu_state == MM_STOPWATCH && in_sub_menu == 0) {
             sprintf(screen_str, "%01u:%02u:%02u.%d", sw_hours, sw_mins, sw_secs, sw_decisecs);
@@ -271,17 +271,26 @@ void update_menu() {
   }
 }
 
-int map_batt(int input, int input_min, int input_max, int output_min, int output_max) {
+// Map battery voltage to percentage
+int map_batt(
+  int input, 
+  int input_min, 
+  int input_max, 
+  int output_min, 
+  int output_max
+) {
   int output = (int)((float)(input - input_min) / (float)(input_max - input_min) * 
                (float)(output_max - output_min) + (float)output_min);
   output = ((output + 5) / 10) * 10;
   return output;
 }
 
+// PDM microphone interrupt handler
 void on_pdm_samples_ready() {
   pdm_microphone_read(mic_samp_buff[samp_idx++], SAMPLE_BUFFER_SIZE);
 }
 
+// Core 1 - handle main menu and screen updates
 void core1_entry() {
 
   // Real time variables
@@ -307,14 +316,22 @@ void core1_entry() {
   int screen_status = 1;
 
   while (true) {
+
+    // Update the main menu
     update_menu();
+
+    // Get step tracking update
     update_step(&prev_z, &step_count);
+
+    // Get screen rotation status
     screen_rot = check_screen();
     if (screen_rot == 1)  screen_status = 1;
     if (screen_rot == -1) screen_status = 0;
     if (screen_status) {
       switch (main_menu_state) {
         case MM_TIME:
+
+          // We have NTP time and this is the first initialization 
           if (!ntp_time_initialized && ntp_time_ready) {
             datetime_t now;
             get_current_ntp_time(&now);
@@ -327,6 +344,8 @@ void core1_entry() {
             ntp_time_initialized = true;
             last_time_update = get_absolute_time();
             sprintf(time_str, "%02u:%02u:%02u", hours, minutes, seconds);
+
+          // We have NTP time and we have already initialized
           } else if (ntp_time_initialized) {
             if (absolute_time_diff_us(last_time_update, get_absolute_time()) >= 1000000) {
               sprintf(prev_time_str, "%s", time_str);
@@ -346,6 +365,8 @@ void core1_entry() {
               sprintf(time_str, "%02u:%02u:%02u", hours, minutes, seconds);
             }
             sprintf(date_str, "%02u/%02u", month, day);
+
+          // NTP time has not been acquired - default to uptime
           } else {
             sprintf(prev_time_str, "%s", time_str);
             uptime_ms = time_us_64() / 1000;
@@ -355,6 +376,8 @@ void core1_entry() {
             sprintf(time_str, "%02u:%02u:%02u", hours, minutes, seconds);
             sprintf(date_str, "%02u/%02u", month, day);
           }
+
+          // If time on screen has been updated, refresh the screen
           if (seconds != prev_seconds) {
             prev_seconds = seconds;
             SSH1106_GotoXY(25, 10);
@@ -379,12 +402,16 @@ void core1_entry() {
         case MM_TEXT:
           if (in_sub_menu) {
             int ypos = 10;
+
+            // Erase the screen
             for (int i = 0; i < 128; i++)
               for (int j = 0; j < 64; j++)
                 SSH1106_DrawPixel(i, j, SSH1106_COLOR_BLACK);
-            char line_buffer[17]; // Buffer to hold each line (16 chars + null terminator)
+            char line_buffer[17];
             int line_start = 0;
-            int line_end = 0;
+            int line_end   = 0;
+
+            // Process text until end of string
             while (filtered_message[line_end] != '\0') {
 
               // Look for the next newline or end of string
@@ -416,10 +443,16 @@ void core1_entry() {
           break;
         case MM_HEART_RATE:
         if (in_sub_menu) {
+
+          // Erase the screen
           for (int i = 0; i < 128; i++)
             for (int j = 0; j < 64; j++)
               SSH1106_DrawPixel(i, j, SSH1106_COLOR_BLACK);
+
+          // Currently displaying heart rate
           if (hr_screen) {
+
+            // If there is a new heart beat
             if (max30102_hr_check_for_beat(max30102_get_ir(&sense), &hr_signal, fir_coeffs)) {
               long delta = to_ms_since_boot(get_absolute_time()) - last_beat;
               last_beat = to_ms_since_boot(get_absolute_time());            
@@ -443,15 +476,23 @@ void core1_entry() {
             SSH1106_GotoXY(15, 25);
             SSH1106_Puts(screen_str, &Font_11x18, 1);
           } else {
+
+            // Shift SPO2 buffer
             for (int i = HR_BUFFER_LENGTH/4; i < HR_BUFFER_LENGTH; i++) {
               pun_ir_buffer[i - HR_BUFFER_LENGTH/4] = pun_ir_buffer[i];
               pun_red_buffer[i - HR_BUFFER_LENGTH/4] = pun_red_buffer[i];
             }
+
+            // Fill in new values to SPO2 buffers
             for (int i = 3*HR_BUFFER_LENGTH/4; i < HR_BUFFER_LENGTH; i++) {
+
+              // Wait until new sample is available
               while (!max30102_avail(&sense)) max30102_hr_check(&sense);
               pun_red_buffer[i] = max30102_get_red(&sense);
               pun_ir_buffer[i] = max30102_get_ir(&sense);
               max30102_next_sample(&sense);
+
+              // Perform SPO2 calculation
               max30102_read_spo2(
                 pun_ir_buffer, 
                 HR_BUFFER_LENGTH, 
@@ -460,6 +501,8 @@ void core1_entry() {
                 &pch_spo2_valid
               );
             }
+
+            // Only display valid SPO2 value
             if (!pch_spo2_valid) {
               sprintf(screen_str, "SPO2: %d", pn_spo2_prev);
             } else {
@@ -477,9 +520,13 @@ void core1_entry() {
         break;
       case MM_ACTIVITY:
         if (in_sub_menu) {
+
+          // Erase the screen
           for (int i = 0; i < 128; i++)
             for (int j = 0; j < 64; j++)
               SSH1106_DrawPixel(i, j, SSH1106_COLOR_BLACK);
+          
+          // Display current step count
           sprintf(screen_str, "Steps: %d", step_count);
           SSH1106_GotoXY(10, 25);
           SSH1106_Puts(screen_str, &Font_11x18, 1);
@@ -491,9 +538,13 @@ void core1_entry() {
         break;
       case MM_STOPWATCH:
         if (in_sub_menu) {
-        for (int i = 0; i < 128; i++)
-          for (int j = 0; j < 64; j++)
-            SSH1106_DrawPixel(i, j, SSH1106_COLOR_BLACK);
+
+          // Erase the screen 
+          for (int i = 0; i < 128; i++)
+            for (int j = 0; j < 64; j++)
+              SSH1106_DrawPixel(i, j, SSH1106_COLOR_BLACK);
+
+          // Update stopwatch values only if enabled
           if (sw_en) {
             if (sw_decisecs > 9) {
               sw_decisecs = 0;
@@ -510,6 +561,8 @@ void core1_entry() {
             if (sw_hours > 9) {
               sw_hours = 0;
             }
+
+            // Only update screen every 100ms
             if (absolute_time_diff_us(sw_start_time, get_absolute_time()) >= 100000) {
               sw_start_time = get_absolute_time();
               sprintf(screen_str, "%01u:%02u:%02u.%d", sw_hours, sw_mins, sw_secs, sw_decisecs);
@@ -527,6 +580,8 @@ void core1_entry() {
         break;
       case MM_AUDIO:
         if (in_sub_menu) {
+
+          // If we are not done recording, start recording
           if (!done_rec) {
             SSH1106_Clear();
             sprintf(screen_str, "Recording");
@@ -534,6 +589,8 @@ void core1_entry() {
             SSH1106_Puts(screen_str, &Font_11x18, 1);
             SSH1106_UpdateScreen();
             samp_idx = 0;
+
+            // Start recording from PDM microphone
             pdm_microphone_start();
             while (samp_idx < NUM_BURSTS) tight_loop_contents();
             pdm_microphone_stop();
@@ -544,6 +601,8 @@ void core1_entry() {
             SSH1106_UpdateScreen();
             samp_idx = 0;
             samp_idx_inner = 0;
+
+            // Start playback from stored samples to DAC
             while (samp_idx < NUM_BURSTS) {
               dac_value = (mic_samp_buff[samp_idx][samp_idx_inner++] + 32768) >> 4;
               dac_msg = (DAC_CFG_A | (dac_value & 0x0FFF));
@@ -583,6 +642,8 @@ void core1_entry() {
         break;
       }
     } else {
+
+      // Erase the screen
       for (int i = 0; i < 128; i++)
         for (int j = 0; j < 64; j++)
           SSH1106_DrawPixel(i, j, SSH1106_COLOR_BLACK);
@@ -591,8 +652,7 @@ void core1_entry() {
   }
 }
  
-int main()
-{
+int main() {
 
   // POR delay
   sleep_ms(10);
@@ -606,7 +666,6 @@ int main()
   gpio_set_function(SCL_PIN, GPIO_FUNC_I2C);
 
   // Initialize SPI
-  // bitwise_spi0_init();
   spi_init(SPI_PORT, 20000000); // 20MHz
   spi_set_format(SPI_PORT, 16, 0, 0, 0);
   gpio_set_function(PIN_MISO, GPIO_FUNC_SPI);
@@ -618,7 +677,6 @@ int main()
   gpio_init(CYCLE_BUTTON);
   gpio_set_dir(CYCLE_BUTTON, GPIO_IN);
   gpio_pull_down(CYCLE_BUTTON);
-
   gpio_init(SELECT_BUTTON);
   gpio_set_dir(SELECT_BUTTON, GPIO_IN);
   gpio_pull_down(SELECT_BUTTON);
@@ -652,16 +710,14 @@ int main()
   start_wifi_threads();
   SSH1106_Clear();
 
-  if (!connect_status)
-  {
+  // Display connection status
+  if (!connect_status) {
     SSH1106_GotoXY(20, 15);
     SSH1106_Puts(" Connect ", &Font_11x18, 1);
     SSH1106_GotoXY(20, 35);
     SSH1106_Puts(" Success ", &Font_11x18, 1);
     SSH1106_UpdateScreen();
-  }
-  else
-  {
+  } else {
     SSH1106_GotoXY(20, 15);
     SSH1106_Puts(" Connect ", &Font_11x18, 1);
     SSH1106_GotoXY(20, 35);
@@ -671,15 +727,18 @@ int main()
   sleep_ms(2000);
   SSH1106_Clear();
 
+  // Launch core 1
   multicore_reset_core1();
   multicore_launch_core1(core1_entry);
 
+  // Core 0 - handle texting and WiFi interface
   while(1) {
     const char *msg = get_latest_udp_message();
     if (strcmp(msg, last_message) != 0) {
       int j = 0;
       int ypos = 10;
-      for (int i = 0; i < BEACON_MSG_LEN_MAX && msg[i] != '\0' && msg[i] != '\r' && msg[i] != '\n'; i++) {
+      for (int i = 0; i < BEACON_MSG_LEN_MAX && msg[i] != '\0' && 
+           msg[i] != '\r' && msg[i] != '\n'; i++) {
         if (msg[i] >= 32 && msg[i] <= 126) {
           filtered_message[j++] = msg[i];
           if (j % 16 == 0)

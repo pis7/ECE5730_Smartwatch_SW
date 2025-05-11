@@ -43,6 +43,7 @@
         "system_error": "c",
         "no_wifi_img.h": "c",
         "uart.h": "c",
-        "mic_img.h": "c"
+        "mic_img.h": "c",
+        "stdlib.h": "c"
     }
 }

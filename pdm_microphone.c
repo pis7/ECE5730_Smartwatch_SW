@@ -6,8 +6,7 @@
  */
 
 #include "common.h"
-
-#include "OpenPDMFilter.h"
+#include "open_pdm_filter.h"
 #include "pdm_microphone.pio.h"
 #include "pdm_microphone.h"
 

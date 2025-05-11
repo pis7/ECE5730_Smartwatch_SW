@@ -20,7 +20,9 @@
 #include "hardware/i2c.h"
 #include "hardware/spi.h"
 #include "hardware/clocks.h"
-#include "hardware/rtc.h"
+#include "hardware/sync.h"
+#include "hardware/uart.h"
+#include "hardware/timer.h"
 
 // SPI configurations
 #define PIN_SCK  2

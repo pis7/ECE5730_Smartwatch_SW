@@ -10,8 +10,7 @@
 #define MAX30102_BUFF_SZ      (MAX30102_SAMP_FREQ * 4) 
 #define MAX30102_MA4_SZ       4
 
-typedef struct 
-{
+typedef struct {
   uint32_t red[MAX30102_HR_STORE_SZ];
   uint32_t ir [MAX30102_HR_STORE_SZ];
   uint8_t  head;
