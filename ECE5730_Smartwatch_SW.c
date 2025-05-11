@@ -351,15 +351,15 @@ void core1_entry() {
               sprintf(prev_time_str, "%s", time_str);
               last_time_update = get_absolute_time();
               seconds++;
-              if (seconds >= 60) {
+              if (seconds > 59) {
                 seconds = 0;
                 minutes++;
               }
-              if (minutes >= 60) {
+              if (minutes > 59) {
                 minutes = 0;
                 hours++;
               }
-              if (hours >= 24){
+              if (hours > 24){
                 hours = 0;
               }
               sprintf(time_str, "%02u:%02u:%02u", hours, minutes, seconds);
