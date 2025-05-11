@@ -44,6 +44,8 @@
         "no_wifi_img.h": "c",
         "uart.h": "c",
         "mic_img.h": "c",
-        "stdlib.h": "c"
+        "stdlib.h": "c",
+        "wifi_udp.h": "c",
+        "common.h": "c"
     }
 }

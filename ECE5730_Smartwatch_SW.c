@@ -335,7 +335,6 @@ void core1_entry() {
       prev_seconds = seconds;
       ntp_time_initialized = true;
       last_time_update = get_absolute_time();
-      sprintf(time_str, "%02u:%02u:%02u", hours, minutes, seconds);
 
     // We have NTP time and we have already initialized
     } else if (ntp_time_initialized) {
@@ -354,9 +353,7 @@ void core1_entry() {
         if (hours > 24){
           hours = 0;
         }
-        sprintf(time_str, "%02u:%02u:%02u", hours, minutes, seconds);
       }
-      sprintf(date_str, "%02u/%02u", month, day);
 
     // NTP time has not been acquired - default to uptime
     } else {
@@ -365,8 +362,6 @@ void core1_entry() {
       hours = (uptime_ms / (1000 * 60 * 60)) % 24;
       minutes = (uptime_ms / (1000 * 60)) % 60;
       seconds = (uptime_ms / 1000) % 60;
-      sprintf(time_str, "%02u:%02u:%02u", hours, minutes, seconds);
-      sprintf(date_str, "%02u/%02u", month, day);
     }
 
     // Get screen rotation status
@@ -376,6 +371,10 @@ void core1_entry() {
     if (screen_status) {
       switch (main_menu_state) {
         case MM_TIME:
+
+        // Create date and time strings 
+        sprintf(date_str, "%02u/%02u", month, day);
+        sprintf(time_str, "%02u:%02u:%02u", hours, minutes, seconds);
 
           // If time on screen has been updated, refresh the screen
           if (seconds != prev_seconds) {
