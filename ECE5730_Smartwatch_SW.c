@@ -323,6 +323,52 @@ void core1_entry() {
     // Get step tracking update
     update_step(&prev_z, &step_count);
 
+    // We have NTP time and this is the first initialization 
+    if (!ntp_time_initialized && ntp_time_ready) {
+      datetime_t now;
+      get_current_ntp_time(&now);
+      hours = now.hour;
+      minutes = now.min;
+      seconds = now.sec;
+      month = now.month;
+      day = now.day;
+      prev_seconds = seconds;
+      ntp_time_initialized = true;
+      last_time_update = get_absolute_time();
+      sprintf(time_str, "%02u:%02u:%02u", hours, minutes, seconds);
+
+    // We have NTP time and we have already initialized
+    } else if (ntp_time_initialized) {
+      if (absolute_time_diff_us(last_time_update, get_absolute_time()) >= 1000000) {
+        sprintf(prev_time_str, "%s", time_str);
+        last_time_update = get_absolute_time();
+        seconds++;
+        if (seconds > 59) {
+          seconds = 0;
+          minutes++;
+        }
+        if (minutes > 59) {
+          minutes = 0;
+          hours++;
+        }
+        if (hours > 24){
+          hours = 0;
+        }
+        sprintf(time_str, "%02u:%02u:%02u", hours, minutes, seconds);
+      }
+      sprintf(date_str, "%02u/%02u", month, day);
+
+    // NTP time has not been acquired - default to uptime
+    } else {
+      sprintf(prev_time_str, "%s", time_str);
+      uptime_ms = time_us_64() / 1000;
+      hours = (uptime_ms / (1000 * 60 * 60)) % 24;
+      minutes = (uptime_ms / (1000 * 60)) % 60;
+      seconds = (uptime_ms / 1000) % 60;
+      sprintf(time_str, "%02u:%02u:%02u", hours, minutes, seconds);
+      sprintf(date_str, "%02u/%02u", month, day);
+    }
+
     // Get screen rotation status
     screen_rot = check_screen();
     if (screen_rot == 1)  screen_status = 1;
@@ -330,52 +376,6 @@ void core1_entry() {
     if (screen_status) {
       switch (main_menu_state) {
         case MM_TIME:
-
-          // We have NTP time and this is the first initialization 
-          if (!ntp_time_initialized && ntp_time_ready) {
-            datetime_t now;
-            get_current_ntp_time(&now);
-            hours = now.hour;
-            minutes = now.min;
-            seconds = now.sec;
-            month = now.month;
-            day = now.day;
-            prev_seconds = seconds;
-            ntp_time_initialized = true;
-            last_time_update = get_absolute_time();
-            sprintf(time_str, "%02u:%02u:%02u", hours, minutes, seconds);
-
-          // We have NTP time and we have already initialized
-          } else if (ntp_time_initialized) {
-            if (absolute_time_diff_us(last_time_update, get_absolute_time()) >= 1000000) {
-              sprintf(prev_time_str, "%s", time_str);
-              last_time_update = get_absolute_time();
-              seconds++;
-              if (seconds > 59) {
-                seconds = 0;
-                minutes++;
-              }
-              if (minutes > 59) {
-                minutes = 0;
-                hours++;
-              }
-              if (hours > 24){
-                hours = 0;
-              }
-              sprintf(time_str, "%02u:%02u:%02u", hours, minutes, seconds);
-            }
-            sprintf(date_str, "%02u/%02u", month, day);
-
-          // NTP time has not been acquired - default to uptime
-          } else {
-            sprintf(prev_time_str, "%s", time_str);
-            uptime_ms = time_us_64() / 1000;
-            hours = (uptime_ms / (1000 * 60 * 60)) % 24;
-            minutes = (uptime_ms / (1000 * 60)) % 60;
-            seconds = (uptime_ms / 1000) % 60;
-            sprintf(time_str, "%02u:%02u:%02u", hours, minutes, seconds);
-            sprintf(date_str, "%02u/%02u", month, day);
-          }
 
           // If time on screen has been updated, refresh the screen
           if (seconds != prev_seconds) {
