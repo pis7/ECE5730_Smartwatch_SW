@@ -11,8 +11,8 @@ uint32_t auth    = CYW43_AUTH_WPA2_MIXED_PSK;
 // #define WIFI_SSID "CTT-WIFI"
 // #define WIFI_PASSWORD "5FBUMP4E"
 
-#define WIFI_SSID "Parker’s iPhone"
-#define WIFI_PASSWORD "Temp123!"
+  #define WIFI_SSID "Parker’s iPhone"
+  #define WIFI_PASSWORD "Temp123!"
 
 bool ntp_time_ready = false;
 static NTP_T ntp;
