@@ -176,7 +176,7 @@ void update_menu() {
           if (main_menu_state == MM_AUDIO) audio_done_rec = 0;
           else if (main_menu_state == MM_HEART_RATE && in_sub_menu == 0) {
             max30102_on();
-            sprintf(screen_str, "hr_bpm: %d", hr_bpm_avg);
+            sprintf(screen_str, "BPM: %d", hr_bpm_avg);
             SSH1106_GotoXY(15, 25);
             SSH1106_Puts(screen_str, &Font_11x18, 1);
             SSH1106_UpdateScreen();
